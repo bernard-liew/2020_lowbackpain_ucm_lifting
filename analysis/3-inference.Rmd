@@ -1,0 +1,275 @@
+---
+title: "3-inference"
+author: "bernard-liew"
+date: "2020-06-09"
+output: workflowr::wflow_html
+editor_options:
+  chunk_output_type: console
+---
+
+## Load packages
+
+```{r message=FALSE, warning=FALSE}
+# Clear workspace
+rm (list = ls ())
+
+# Helper packages
+library (tidyverse)
+library (doParallel)
+library (magrittr)
+library (broom)
+
+# Plotting
+library (cowplot)
+
+# Statistics
+library (NMF)
+library (pracma)
+library (emmeans)
+library (mgcv)
+library (pammtools)
+library (lme4)
+
+# Custom functions
+source ("code/ucm4.R")
+
+
+```
+
+
+## Read in data
+
+```{r message=FALSE, warning=FALSE}
+
+ima_dev <- readRDS( "output/ucm_df_cat.RDS")
+list_nmf_final_ord <- readRDS ("output/nmf_ordered.RDS")
+output <- "output"
+
+ms.ord <- c("msTA", "msSOL", "msGL", "msVL", "msRF", "msBicepsF", "msST", "msGMax",
+           "msEO" , "msLongis" ,"msIleoc"  , "msLatsD"   ,"msBicepsB" ,"msDelt")  
+phase.ord <- c("lift_ln", "lower_ln")
+
+comp_no <- 3
+
+h <-  map(list_nmf_final_ord, ~coef_merge(.)) %>% 
+  bind_rows(.id = "task")
+
+h$cycle <- as.numeric (rep (c(1:101), length.out = nrow (h)))
+h$rep <- rep (rep (c(1:20), each = 101), length.out = nrow (h))
+h$subj<- map (list_nmf_final_ord, ~ rep(names (.), each  = 101*20)) %>% flatten_chr()
+h$grp <- str_remove(h$subj, "_.*")
+
+by_epoch = TRUE
+```
+
+## H weights inference
+
+### Plot H inference results (figure 3)
+
+```{r}
+
+
+dv <- c("V1", "V2", "V3")
+
+form <- paste(dv, 
+              rep ("grp + task + grp:task + s (cycle, by = interaction (grp, task), bs = quote (cr), k = 15) + s(subj, bs = quote (re))" , times = 3), sep=" ~ ")
+
+mod.list <- list()
+
+for (n in 1:length (dv)) {
+  
+  df <- h %>%
+    as.data.frame() %>%
+    mutate_if (is.character, as.factor)  
+  
+  mod.list[[n]] <- gam (as.formula (form[n]), 
+                        data = df)
+  
+}
+  
+  
+
+task_list <- list()
+mode_list <- list()
+
+for (n in 1:length (dv)) {
+  
+  for (m in seq_along(unique (h$task))) {
+    
+    diff_rel2_con <- infer.posthoc(data = h, mod = mod.list[[n]], dv = dv[n], mult_comp = 6, task_type = phase.ord[m], ref_grp = "con")
+    diff_rel2_rlbp <- infer.posthoc(data = h, mod = mod.list[[n]], dv = dv[n], mult_comp = 6, task_type = phase.ord[m], ref_grp = "rlbp")
+    task_list[[m]] <- bind_rows(diff_rel2_con,diff_rel2_rlbp)
+    
+  }
+  
+  mode_list[[n]] <- task_list
+  
+}
+
+post.hoc.df <- map (mode_list, ~ bind_rows(.)) %>%
+  bind_rows() %>%
+  filter (xtrast != "con-rlbp") %>%
+  mutate (xtrast = factor (xtrast, levels = c("rlbp-con", "clbp-rlbp", "clbp-con"),
+                        labels = c("rLBP-con", "cLBP-rLBP", "cLBP-con")))
+
+
+
+post.hoc.plot <- post.hoc.df %>%
+  mutate (task = str_remove(task, "_ln"),
+          dv = str_replace (dv, "V", "mode ")) %>%
+  ggplot () +
+  geom_line(aes(x = cycle, y = fit, colour = xtrast), size = 1.2) +
+  geom_ribbon(aes(x = cycle, ymin = ci_lower, ymax = ci_upper, fill = xtrast), alpha = 0.2) +
+  scale_color_manual(values = c("black", "blue", "red")) + 
+  scale_fill_manual( values = c("black", "blue", "red")) +
+  facet_wrap(dv ~ task, ncol = 2, nrow = 3) + 
+  ylab  ("Difference in H weights") + 
+  xlab ("% cycle") + 
+  geom_hline(yintercept=0, linetype="dashed", size=1) +
+  labs (fill = "Contrast")+ 
+  guides(color = FALSE) +
+  theme_half_open() +
+  theme(text = element_text(size=20)) 
+  
+post.hoc.plot
+
+# tiff("./../../fig/figure 3.tiff", width = 9, height = 10, units = 'in', res = 300, compression = 'none')
+# post.hoc.plot
+# dev.off()
+
+
+```
+
+### Extract values to report
+
+```{r}
+# Lifting phase
+probe <- post.hoc.df %>%
+  filter (task == "lift_ln" & dv == "V1")
+
+probe[which.max (abs(probe$fit)), ]
+
+probe <- post.hoc.df %>%
+  filter (task == "lift_ln" & dv == "V2")
+
+probe[which.max (abs(probe$fit)), ]
+
+probe <- post.hoc.df %>%
+  filter (task == "lift_ln" & dv == "V3")
+
+probe[which.max (abs(probe$fit)), ]
+
+# Lowering phase
+probe <- post.hoc.df %>%
+  filter (task == "lower_ln" & dv == "V1")
+
+probe[which.max (abs(probe$fit)), ]
+
+probe <- post.hoc.df %>%
+  filter (task == "lower_ln" & dv == "V2")
+
+probe[which.max (abs(probe$fit)), ]
+
+probe <- post.hoc.df %>%
+  filter (task == "lower_ln" & dv == "V3")
+
+probe[which.max (abs(probe$fit)), ]
+
+
+```
+
+
+### UCM data
+
+#### Primary analysis ANOVA
+
+```{r fig.height=8, fig.width=10, message=FALSE, warning=FALSE}
+
+seg_var <- quo(segm)
+
+if (by_epoch == TRUE) {
+  
+  form <- formula (val ~ group * task * epoch2 + (1|subj))
+  
+} else {
+  
+  form <- formula (val ~ group * task + (1|subj))
+}
+
+#
+dat <- ima_dev %>%
+  filter (dv %in% c("S_trans", "GEV", "NGEV")) %>% 
+  mutate (val = ifelse (dv %in% c("GEV", "NGEV"), log(val), val)) %>% 
+  group_by(!!seg_var, dv) %>% 
+  nest() %>% 
+  mutate (models = map (data, ~ lmer(form, data = .)), 
+          aov_mod = map (models, car::Anova, type = 3),
+          aov_mod = map (aov_mod, add_var2_aovtable),
+          glance = map (models, broom::glance),
+          augment = map (models, broom::augment)) # get residuals
+
+
+aov_res <- dat %>%
+  unnest(aov_mod) %>%
+  select (-c(models, data, augment)) %>%
+  filter (!var %in% c("(Intercept)", "Residuals")) %>%
+  ungroup () %>%
+  group_by (var) %T>%
+  {print (tally (.))} %>% # number of comparisons p.adjust is adjusted to.
+  mutate (p.adj = p.adjust(`Pr(>Chisq)`, method = "BY" ) %>% round (3)) %>%
+  filter (p.adj < 0.05)
+
+################ Residual plots against group #################################################
+
+resid.df <- unnest (dat, augment) %>%
+  dplyr::rename ("fitted" = ".fitted",
+                 "resid" = ".resid") %>%
+  select (-c(data, models, aov_mod, glance))
+
+
+ggplot (data = resid.df ) +
+  geom_point (aes (x = fitted, y = resid)) +
+  facet_wrap(segm ~ dv , scales = "free") +
+  labs (x = "fitted",
+        y = "residuals")
+
+
+
+```
+
+### secondary post-hoc analysis
+
+```{r fig.height=8, fig.width=10, message=FALSE, warning=FALSE}
+
+
+post_hoc <- dat %>%
+  mutate (object = pmap (list (data = data, object = models), ref_grid)) %>%
+  unnest (aov_mod) %>%
+  filter (!var %in% c("(Intercept)", "Residuals")) %>%
+  ungroup () %>%
+  group_by (var) %T>%
+  {print (tally (.))} %>% # number of comparisons p.adjust is adjusted to.
+  mutate (p.adj = p.adjust(`Pr(>Chisq)`, method = "BY" ) %>% round (3)) %>%
+  filter (p.adj < 0.05) %>%
+  ungroup() %>%
+  mutate (specs = paste0("pairwise~", var)) %>%
+  mutate (specs = map (specs, as.formula)) %>%
+  mutate (xtrast = pmap (list (object = object, specs = specs), emmeans, adjust = "none"),
+          xtrast2 = map (xtrast, ~summary(.)$contrasts)) %>%
+  select (-c(models, data, augment, object, xtrast)) 
+
+
+xtrast <- post_hoc %>%
+  unnest (xtrast2) %>%
+  group_by (!!seg_var, dv, var) %T>%
+  {print (tally (.))} %>% # number of comparisons p.adjust is adjusted to.
+  #mutate (p.posthoc.adj = p.adjust(`p.value`, method = "BY" ) %>% round (3)) %>%
+  filter (p.value   < 0.05) %>%
+  filter (!(dv %in% c("GEV", "NGEV") & var %in% c("task", "epoch2"))) %>%
+  mutate (p.value = round (p.value, 3))
+
+saveRDS (xtrast, "output/xtrast.RDS")
+```
+
+
+

@@ -1,0 +1,320 @@
+---
+title: "2-UCM_analysis"
+author: "bernard-liew"
+date: "2020-06-09"
+output: workflowr::wflow_html
+editor_options:
+  chunk_output_type: console
+---
+
+## Load packages
+
+```{r message=FALSE, warning=FALSE}
+# Clear workspace
+rm (list = ls ())
+
+# Helper packages
+library (tidyverse)
+library (doParallel)
+library (magrittr)
+library (broom)
+
+# Plotting
+library (cowplot)
+
+# Statistics
+library (NMF)
+library (pracma)
+library (emmeans)
+library (mgcv)
+library (pammtools)
+library (lme4)
+
+# Custom functions
+source ("code/ucm4.R")
+
+
+```
+
+
+## Read in data
+
+```{r message=FALSE, warning=FALSE}
+
+syn_df <- readRDS( "output/synergy_displ.RDS")
+
+output <- "output"
+
+```
+
+## Uncontrolled manifold analysis
+
+### Get the jacobian 
+
+```{r fig.height=8, fig.width=10, message=FALSE, warning=FALSE}
+
+linearize_done <- TRUE
+
+if (linearize_done == FALSE) {
+  
+  syn_df_grp <- syn_df %>%
+  gather (contains("DISPL"), key = kinem, value = displ) %>%
+  mutate_at(c("V1", "V2", "V3", "displ"), scale, center = TRUE, scale = FALSE)  %>%
+  group_by(subj , task, kinem, cycle) %>%
+  nest()
+
+  rhs <- paste0("V", 1:comp_no, collapse = "+")
+  form <- formula (paste0("displ~", "-1 + ", rhs))
+  
+  
+  syn_df_grp  %<>% 
+    mutate (models = map (data, ~ lm (form, data = .)))  %>%
+    mutate (coefs = map (models, broom::tidy)) %>%
+    mutate (glance = map (models, broom::glance),
+            augment = map (models, broom::augment)) %>%
+    select (-models)
+  
+  coefs <- unnest (syn_df_grp, coefs) %>%
+    filter (grepl ("V", term)) %>%
+    select (-c(glance, augment, data, p.value, statistic, std.error)) %>%
+    spread (key = term, value = estimate) %>%
+    rename (v1_jac = V1,
+            v2_jac = V2,
+            v3_jac = V3) %>%
+    ungroup() 
+  
+  aug <- unnest (syn_df_grp, augment) %>%
+    select (-c( coefs, glance, data)) %>%
+    ungroup() 
+  
+  gla <- unnest (syn_df_grp, glance) %>%
+    select (-c(coefs, augment, data))%>%
+    ungroup() 
+  
+  ucm.df <- unnest (syn_df_grp, data) %>%
+    select (-c(coefs, glance, augment)) %>%
+    inner_join(coefs, by = c("subj", "task", "kinem", "cycle"))
+  
+  saveRDS(coefs, file.path(output, "coefs.RDS"))
+  saveRDS(gla, file.path(output,"glance.RDS"))
+  saveRDS(aug, file.path(output,"augment.RDS"))  
+  saveRDS(ucm.df, file.path(output,"ucm_df.RDS"))
+  
+} else {
+  
+  ucm.df <- readRDS (file.path(output, "ucm_df.RDS"))
+  glance.df <- readRDS (file.path(output, "glance.RDS"))
+  augment.df <- readRDS (file.path(output, "augment.RDS"))
+  coef.df <- readRDS (file.path(output, "coefs.RDS"))
+  
+}
+
+```
+
+### Performance of linearization
+
+```{r}
+
+err_df <- glance.df %>%
+  group_by(task, kinem) %>%
+  summarize (r_mean  = mean (adj.r.squared),
+             r_sd = sd (adj.r.squared))  %>%
+  filter (grepl ("PELVIC|RACR", kinem))%>%
+  ungroup () %>%
+  mutate (task = str_remove(task, "_ln"),
+          kinem = str_replace_all (kinem, 
+                                   c("PELVIC_DISPL" = "Pelvis",
+                                   "RACR_DISPL" = "Trunk",
+                                   "AP" = "forward",
+                                   "VERT" = "vertical")))
+  
+
+err_df 
+```
+
+
+### Perform UCM analysis
+
+```{r fig.height=8, fig.width=10, message=FALSE, warning=FALSE}
+
+ucm_done <- TRUE # If UCM done TRUE, if not done FALSE
+
+ucm_univar <- FALSE # if multivariate ucm FALSE, if univariate ucm TRUE
+
+if (ucm_done == FALSE & ucm_univar == FALSE) {
+  
+  seg_var <- quo(segm)
+  
+  ucm.result <- ucm.df %>%
+    ungroup() %>%
+    mutate (segm = ifelse (grepl("PELVIC", kinem), "pelvic", 
+                           ifelse (grepl("RACR", kinem), "trunk", "hand"))) %>%
+    group_by(subj, task, !!seg_var, cycle) %>%
+    nest() %>%
+    mutate (ucm_res = map (data, ucm, kinem))
+    
+  saveRDS(ucm.result, file.path(output, "ucm_result_multvar.RDS"))
+  
+} else if (ucm_done == FALSE & ucm_univar == TRUE) {
+  
+  ucm.result <- ucm.df %>%
+    ungroup() %>%
+    group_by(subj, task, !!seg_var,  cycle) %>%
+    nest() %>%
+    mutate (ucm_res = map (data, ucm))
+    
+  saveRDS(ucm.result, file.path(output, "ucm_result_univar.RDS"))
+  
+} else if (ucm_done == TRUE & ucm_univar == FALSE) {
+  
+  ucm.result<- readRDS (file.path(output, "ucm_result_multvar.RDS"))
+
+} else {
+  
+  ucm.result<- readRDS (file.path(output, "ucm_result_univar.RDS"))
+  
+}
+
+```
+
+## Categorise UCM results
+
+```{r fig.height=8, fig.width=10, message=FALSE, warning=FALSE}
+
+by_epoch <- TRUE # if analyse by epoch2 TRUE, if analyse across all points FALSE
+
+ima_res <- ucm.result %>%
+  mutate (S_trans = map (ucm_res, get_ucm, var = "S_trans"),
+          GEV = map (ucm_res, get_ucm, var = "GEV"),
+          NGEV = map (ucm_res, get_ucm, var = "NGEV")) %>%
+  ungroup () %>%
+  select (-c(data, ucm_res)) %>%
+  mutate_if(is.list, unlist) %>%
+  mutate (group = ifelse (grepl ("clbp", subj), "clbp", 
+                          ifelse (grepl ("rlbp", subj), "rlbp", "con"))) %>%
+  mutate (epoch2 = ifelse (cycle <= 51, "early", "late") %>%
+            factor (levels = c("early", "late"))) %>%
+  mutate (group = factor (group, levels = c("con", "rlbp", "clbp"))) 
+
+if (by_epoch == TRUE & ucm_univar == TRUE) {
+  
+  seg_var <- quo(kinem)
+  
+  ima_res <- ima_res %>%
+    group_by(subj, group, task, !! seg_var, epoch2) %>%
+    summarize_at(vars (S_trans:NGEV), mean) %>%
+    ungroup ()%>%
+    filter (!grepl("WRST", kinem))
+  
+  } else if (by_epoch == FALSE & ucm_univar == TRUE){
+    
+    seg_var <- quo(kinem)
+    
+    ima_res <- ima_res %>%
+      group_by(subj, group, task, !! seg_var) %>%
+      summarize_at(vars (S_trans:NGEV), mean) %>%
+      ungroup () %>%
+    filter (!grepl("WRST", kinem))
+    
+  } else if (by_epoch == TRUE & ucm_univar  == FALSE){
+    
+    seg_var <- quo(segm)
+    
+    ima_res <- ima_res %>%
+      group_by(subj, group, task, !! seg_var, epoch2) %>%
+      summarize_at(vars (S_trans:NGEV), mean) %>%
+      ungroup ()%>%
+      filter (segm != "hand")
+    
+  }else {
+    
+    seg_var <- quo(segm)
+    
+    ima_res <- ima_res %>%
+      group_by(subj, group, task, !! seg_var) %>%
+      summarize_at(vars (S_trans:NGEV), mean) %>%
+      ungroup () %>%
+      filter (segm != "hand")
+  }
+  
+```
+
+## Categorise deviation results
+
+```{r fig.height=8, fig.width=10, message=FALSE, warning=FALSE}
+
+
+dev_res <- ucm.result %>%
+  mutate (ucm_dev = map (ucm_res, get_ucm, var = "ucm_dev"),
+          ort_dev = map (ucm_res, get_ucm, var = "ort_dev")) %>%
+  mutate (ucm_dev = map (ucm_dev, mean),
+          ort_dev = map (ort_dev, mean)) %>%
+  ungroup () %>%
+  select (-c(data, ucm_res)) %>%
+  mutate_if(is.list, unlist) %>%
+  mutate (group = ifelse (grepl ("clbp", subj), "clbp", 
+                          ifelse (grepl ("rlbp", subj), "rlbp", "con"))) %>%
+  mutate (epoch2 = ifelse (cycle <= 51, "early", "late") %>%
+            factor (levels = c("early", "late"))) %>%
+  mutate (group = factor (group, levels = c("con", "rlbp", "clbp"))) 
+
+if (by_epoch == TRUE & ucm_univar == TRUE) {
+  
+  seg_var <- quo(kinem)
+  
+  dev_res <- dev_res %>%
+    group_by(subj, group, task, !! seg_var, epoch2) %>%
+    summarize_at(vars (ucm_dev:ort_dev), mean) %>%
+    ungroup ()%>%
+    filter (!grepl("WRST", kinem))
+  
+  } else if (by_epoch == FALSE & ucm_univar == TRUE){
+    
+    seg_var <- quo(kinem)
+    
+    dev_res <- dev_res %>%
+      group_by(subj, group, task, !! seg_var) %>%
+      summarize_at(vars (ucm_dev:ort_dev), mean) %>%
+      ungroup () %>%
+    filter (!grepl("WRST", kinem))
+    
+  } else if (by_epoch == TRUE & ucm_univar == FALSE){
+    
+    seg_var <- quo(segm)
+    
+    dev_res <- dev_res %>%
+      group_by(subj, group, task, !! seg_var, epoch2) %>%
+      summarize_at(vars (ucm_dev:ort_dev), mean) %>%
+      ungroup ()%>%
+      filter (segm != "hand")
+    
+  }else {
+    
+    seg_var <- quo(segm)
+    
+    dev_res <- dev_res %>%
+      group_by(subj, group, task, !! seg_var) %>%
+      summarize_at(vars (ucm_dev:ort_dev), mean) %>%
+      ungroup () %>%
+      filter (segm != "hand")
+  }
+
+
+
+```
+
+### merge deviation with ucm data
+
+```{r}
+
+ima_res <- ima_res %>%
+  gather (c(S_trans, GEV, NGEV), key = dv, value = val) 
+
+dev_res <- dev_res %>%
+  gather (c(ucm_dev, ort_dev), key = dv, value = val) 
+  
+ima_dev <- bind_rows(ima_res, dev_res)
+
+saveRDS(ima_dev, "output/ucm_df_cat.RDS")
+
+```

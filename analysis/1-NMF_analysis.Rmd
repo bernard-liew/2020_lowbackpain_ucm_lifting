@@ -1,0 +1,389 @@
+---
+title: "1-NMF_analysis"
+author: "bernard-liew"
+date: "2020-06-09"
+output: workflowr::wflow_html
+editor_options:
+  chunk_output_type: console
+---
+
+## Load packages
+
+```{r message=FALSE, warning=FALSE}
+# Clear workspace
+rm (list = ls ())
+
+# Helper packages
+library (tidyverse)
+library (doParallel)
+library (magrittr)
+library (broom)
+
+# Plotting
+library (cowplot)
+library("viridis") 
+
+# Statistics
+library (NMF)
+library (pracma)
+library (emmeans)
+library (mgcv)
+library (pammtools)
+library (lme4)
+
+# Custom functions
+source ("code/ucm4.R")
+
+```
+
+## Load workspace to get raw data and results 
+
+```{r message=FALSE, warning=FALSE}
+
+output <- "output"
+
+# original emg data
+df.mat <- readRDS("output/emg_dat.RDS")
+displ <- readRDS("output/kinem_dat.RDS")
+
+ms.ord <- c("msTA", "msSOL", "msGL", "msVL", "msRF", "msBicepsF", "msST", "msGMax",
+           "msEO" , "msLongis" ,"msIleoc"  , "msLatsD"   ,"msBicepsB" ,"msDelt")  
+
+phase.ord <- c("lift_ln", "lower_ln")
+
+```
+
+
+## NMF analysis
+
+### Perform NMF
+
+```{r message=FALSE, warning=FALSE}
+
+###################### Standard nmf ################################
+
+nmf_done <- TRUE
+
+if (nmf_done == FALSE) {
+  
+  # do NMF
+  
+  doParallel::registerDoParallel(7)
+  
+  # do for each lifting phase and safe separately
+  for (n in seq_along(phase.ord)) {
+    
+    nmf_dat <- df.mat[[n]]
+    nsubj <- length (nmf_dat)
+    
+    ############### Iterate over 6 factors ########################
+    syn <- 
+      foreach (m = 1:6) %:% # synergy max number = 6
+        foreach (p = 1: nsubj) %dopar%{  
+          NMF::nmf (nmf_dat [[p]], rank = m, method = "lee")
+        }
+    
+    saveRDS(syn, file = file.path("output", paste0(phase.ord[n], ".rds")))
+  }
+  
+    
+    # read in NMF of each lift phase and merge
+    list_nmf <- list()
+
+    for (n in seq_along(phase.ord)) {
+      list_nmf[[n]] <- readRDS(file = file.path("output", paste0(phase.ord[n], ".rds")))
+      }
+
+    for (n in seq_along(phase.ord)) {
+      for (m in 1:6) {
+        names (list_nmf[[n]][[m]]) <- names (df.mat[[n]])
+        }
+      }
+
+    names (list_nmf) <- phase.ord
+    
+    # save merged nmf results
+    saveRDS(list_nmf, "output/nmf_res.RDS")
+  
+  
+  
+} else {
+  
+  list_nmf <- readRDS("output/nmf_res.RDS")
+  
+  }
+
+    
+    
+    
+
+```
+
+
+### Calculate Variance accounted for (VAF)
+
+```{r message=FALSE, warning=FALSE}
+
+###################### Calculate vaf################################
+vaf_list <- list ()
+vaf_list2 <- list ()
+
+nsubj <- map_dbl(df.mat, length)
+
+for (n in seq_along(phase.ord)) {
+  
+  df <- list_nmf[[n]]
+  targ <- df.mat[[n]]
+  
+  for (m in 1:6) {
+    
+    vaf <- pmap (list (object = df[[m]],target = targ),evar)
+    vaf_list2 [[m]] <- vaf
+  }
+  
+  vaf_list [[n]] <- vaf_list2
+}
+
+
+vaf_df <- list()
+for (n in seq_along(phase.ord)) {
+  
+  temp <- map (vaf_list[[n]], unlist)
+  names (temp) = paste0("comp", c(1:6))
+  temp  <- bind_rows(temp)
+  temp$subj <- c (1:nsubj[n])
+  vaf_df[[n]] <- temp
+}
+
+names (vaf_df) <- phase.ord
+vaf_df <- bind_rows(vaf_df, .id = "task")
+
+```
+
+### Plot VAF to mode number
+
+```{r message=FALSE, warning=FALSE}
+# Increment in VAF per factor
+
+comp <- vaf_df %>%
+  gather (c(comp1:comp6), key = syn_no, value = vaf) %>%
+  mutate (syn_no = str_remove(syn_no, "comp") %>% as.numeric) %>%
+  arrange(task, subj, syn_no ) %>%
+  group_by(task, subj) %>%
+  mutate(vaf_lag = dplyr::lag (vaf, n = 1, default = NA),
+         vaf_diff = (vaf - vaf_lag)*100) %>%
+  ungroup () %>%
+  mutate (task = str_remove (task, "_ln"),
+          Subject = factor (subj)) %>%
+  na.omit() %>%
+  ungroup ()
+  
+c <- comp %>%
+  ggplot (aes(x = syn_no, y = vaf_diff, color = Subject),  size = 1) +
+  geom_line() +
+  scale_colour_viridis(discrete = TRUE, option = "D")+
+  facet_wrap(~task) +
+  ylab ("Change in %VAF") + 
+  xlab ("Number of modes") +
+  theme_half_open() + 
+  theme(text = element_text(size=20)) +
+  geom_hline(aes (yintercept = 3), linetype = 2)
+
+c
+
+# tiff("./../../fig/1_w_plot.tiff", width = 20, height = 10, units = 'in', res = 200, compression = 'none')
+# w.plot
+# dev.off()
+
+```
+
+### Select final number of modes for all subjects
+
+```{r message=FALSE, warning=FALSE}
+
+nmf_order_done <- TRUE
+comp_no <- 3 # number of synergies
+
+if (nmf_order_done == FALSE) {
+
+  list_nmf_final <- list()
+  
+  # select synergy number
+  for (n in seq_along(phase.ord)) {
+    
+    list_nmf_final[[n]] <- list_nmf[[n]][[comp_no]]
+    
+  }
+  
+  ################### Order synergies #############################
+  
+  set.seed(123)
+  ref_list = list()
+  
+  for (n in seq_along(phase.ord)) {
+    con_vec <- which (grepl ("con", names (list_nmf_final[[n]])) == TRUE)
+    ref_list[[n]] <- sample(con_vec,1)
+  }
+  
+  ref_list <- unlist(ref_list)
+  
+  
+  list_nmf_final_ord <-  list()
+  
+  for (n in seq_along(phase.ord)) {
+    
+    ref <- ref_list[n]
+    s <- nsubj[n]
+    
+    temp <- list_nmf_final[[n]]
+    temp.ref <- rep (temp [ref], s)
+    list_nmf_final_ord [[n]] <-  pmap (list (syn_ref = temp.ref, syn_ext = temp) , matchSynergies)
+    
+    names (list_nmf_final_ord [[n]]) <- names(temp)
+  }
+  
+  names (list_nmf_final_ord) <-  phase.ord
+  
+  saveRDS (list_nmf_final_ord, "output/nmf_ordered.RDS")
+  
+} else {
+  
+  list_nmf_final_ord <- readRDS ("output/nmf_ordered.RDS")
+  
+}
+
+```
+
+### Plot W weights (figure 1)
+
+```{r fig.height=8, fig.width=10, message=FALSE, warning=FALSE}
+
+
+
+ms.ord <- str_remove (ms.ord, "ms")
+
+
+w <-  map(list_nmf_final_ord, ~basis_merge(.)) %>% 
+  map (~mutate (., muscle = rep (ms.ord, nrow(.)/length (ms.ord)))) %>% 
+  bind_rows(.id = "task")
+
+w$subj <- map (list_nmf_final_ord, ~ rep(names (.), each  = 14)) %>% flatten_chr()
+w$grp <- str_remove(w$subj, "_.*")
+
+
+
+#### w plot ###############
+phase.ord.sub <- str_remove (phase.ord, "_ln")
+w.df <- w %>%
+  gather (c(V1:noquote(paste0("V",comp_no))), key = synergy, value = load) %>%
+  mutate (synergy = str_replace(synergy, "V", "mode "),
+          task = str_remove (task, "_ln")) %>%
+  mutate (muscle = factor (muscle, levels = ms.ord),
+          grp = factor (grp, levels = c("con", "rlbp", "clbp"), labels =c("con", "rLBP", "cLBP") ),
+          task = factor (task, levels = phase.ord.sub ),
+          synergy = factor (synergy)) %>%
+  group_by(task, grp, synergy, muscle) %>%
+  summarize (load_mean = mean (load),
+             load_sd = sd (load)) %>%
+  ungroup () 
+
+
+lift_w_ave <- w.df %>%
+  dplyr::filter (task == "lift" & grp == "con") %>%
+  summarize (mean(load_mean))%>%
+  pull()
+
+
+lower_w_ave <- w.df  %>%
+  filter (task == "lower" & grp == "con") %>%
+  summarize (mean(load_mean))%>%
+  pull()
+
+
+w.df$h_line <- rep (c(lift_w_ave, lower_w_ave), each = nrow (w.df)/2)
+
+
+
+w.plot <-  w.df %>%
+  ggplot () +
+  geom_bar(aes (x = muscle, y = load_mean, fill = grp, colour = grp), stat = "identity", 
+           position = position_dodge(width = 0.9)) +
+  geom_errorbar(aes (x = muscle, ymin = load_mean, ymax = load_mean + load_sd, colour = grp), stat = "identity", 
+                position = position_dodge(width = 0.9), width = 0.3) +
+  ylim(0, 0.35) +
+  geom_hline(aes(yintercept = h_line), linetype = "dashed") + 
+  facet_wrap(  task ~ synergy  ,  scales = "fixed") + 
+  ylab  ("Loading") + 
+  scale_fill_manual(values = c("black", "blue", "red")) + 
+  scale_colour_manual(values = c("black", "blue", "red"), guide = FALSE) + 
+  theme_half_open() + 
+  theme(text = element_text(size=20),
+        axis.text.x = element_text(angle = 45, hjust = 1))  +
+  labs (fill = "Group")
+
+w.plot
+
+# tiff("./../../fig/figure 1.tiff", width = 20, height = 10, units = 'in', res = 300, compression = 'none')
+# w.plot
+# dev.off()
+
+```
+
+### Plot H weights (figure 2)
+
+```{r message=FALSE, warning=FALSE}
+
+h <-  map(list_nmf_final_ord, ~coef_merge(.)) %>% 
+  bind_rows(.id = "task")
+
+h$cycle <- as.numeric (rep (c(1:101), length.out = nrow (h)))
+h$rep <- rep (rep (c(1:20), each = 101), length.out = nrow (h))
+h$subj<- map (list_nmf_final_ord, ~ rep(names (.), each  = 101*20)) %>% flatten_chr()
+h$grp <- str_remove(h$subj, "_.*")
+
+h.df <- h %>%
+  gather (c(V1:noquote(paste0("V",comp_no))), key = synergy, value = load) %>%
+  mutate (synergy = str_replace(synergy, "V", "mode "),
+          cycle = as.numeric (cycle) ,
+          task = factor (task, levels = phase.ord),
+          task = str_remove (task, "_ln"),
+          grp = factor (grp, levels = c("con", "rlbp", "clbp"), 
+                        labels = c("con", "rLBP", "cLBP"))) %>%
+  group_by(grp, task, synergy, cycle) %>%
+  summarize (Mean = mean (load),
+             Sd = sd (load)) %>%
+  ungroup () 
+
+h.plot <- h.df %>%
+  ggplot () +
+  geom_line(aes(x = cycle, y = Mean, colour = grp), size = 1.5) +
+  geom_ribbon(aes (x = cycle, ymin = Mean - Sd, ymax = Mean + Sd, fill = grp), alpha = 0.2) + 
+  scale_color_manual(values = c("black", "blue", "red")) + 
+  scale_fill_manual(values = c("black", "blue", "red")) + 
+  ylab  ("Weights") + 
+  xlab ("% cycle") +
+  facet_wrap(synergy~task, nrow = comp_no, scales = "fixed") +
+  theme_half_open() + 
+  theme(text = element_text(size=20)) + 
+  labs (colour = "Group") +
+  guides (fill = FALSE)
+
+h.plot
+
+# tiff("./../../fig/figure 2.tiff", width = 8, height = 10, units = 'in', res = 300, compression = 'none')
+# h.plot
+# dev.off()
+
+```
+
+### Combine synergy dataframe with kinematic dataframe
+
+```{r message=FALSE, warning=FALSE}
+
+syn_df <- displ %>%
+  inner_join(h, by = c("subj", "task", "cycle", "rep")) %>%
+  select (-reps, -reps2, - trial, -max_rep)
+
+saveRDS(syn_df, "output/synergy_displ.RDS")
+
+```
