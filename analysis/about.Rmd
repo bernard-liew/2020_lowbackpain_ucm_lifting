@@ -1,5 +1,5 @@
 ---
-title: "About"
+title: "Influence of low back pain and its remission on motor abundance in a low-load lifting task"
 output:
   workflowr::wflow_html:
     toc: false
@@ -7,4 +7,4 @@ editor_options:
   chunk_output_type: console
 ---
 
-Describe your project.
+Codes for performing the analysis
