@@ -1,0 +1,306 @@
+---
+title: "4-plot UCMstatistics"
+author: "bernard-liew"
+date: "2020-06-09"
+output: workflowr::wflow_html
+editor_options:
+  chunk_output_type: console
+---
+
+## Load packages
+
+```{r message=FALSE, warning=FALSE}
+# Clear workspace
+rm (list = ls ())
+
+# Helper packages
+library (tidyverse)
+library (doParallel)
+library (magrittr)
+library (broom)
+
+# Plotting
+library (cowplot)
+
+# Statistics
+library (NMF)
+library (pracma)
+library (emmeans)
+library (mgcv)
+library (pammtools)
+library (lme4)
+
+# Custom functions
+source ("code/ucm4.R")
+
+
+```
+
+## Load workspace to get raw data and results 
+
+```{r message=FALSE, warning=FALSE}
+
+
+xtrast <- readRDS("output/xtrast.RDS")
+ima_dev <- readRDS("output/ucm_df_cat.RDS")
+
+by_epoch <- TRUE
+ucm_univar <- FALSE
+
+```
+
+
+## Plot UCM results
+
+### Generate plot df
+
+```{r}
+if (by_epoch == TRUE & ucm_univar == TRUE) {
+  
+  seg_var <- quo(kinem)
+  
+  plot.df <- ima_dev %>% # ima_dev for obs, resid.df for fitted
+    mutate (task = str_remove (task, "_ln")) %>%
+  mutate (kinem = str_replace_all (kinem, 
+                                   c("PELVIC_DISPL" = "Pelvis",
+                                   "RACR_DISPL" = "Trunk",
+                                   "AP" = "forward",
+                                   "VERT" = "vertical"))) %>%
+    mutate (Group = factor (group, levels = c("con", "rlbp", "clbp"), labels = c("con", "rLBP", "cLBP"))) %>%
+    dplyr::group_by(task, !!seg_var, epoch2, dv) %>%
+    mutate (cohort_mean = mean (val)) %>%
+    dplyr::group_by(Group, task, !!seg_var, epoch2, dv) %>%
+    dplyr::summarize (Mean = mean (val),
+                      Err = sd (val)) %>%
+    ungroup() 
+} else if (by_epoch == FALSE & ucm_univar == TRUE) {
+  
+  seg_var <- quo(kinem)
+  
+  plot.df <- ima_dev %>% # ima_dev for obs, resid.df for fitted
+    mutate (task = str_remove (task, "_ln")) %>%
+   mutate (kinem = str_replace_all (kinem, 
+                                   c("PELVIC_DISPL" = "Pelvis",
+                                   "RACR_DISPL" = "Trunk",
+                                   "AP" = "forward",
+                                   "VERT" = "vertical"))) %>%
+    mutate (Group = factor (group, levels = c("con", "rlbp", "clbp"), labels = c("con", "rLBP", "cLBP"))) %>%
+    dplyr::group_by(Group, task, !!seg_var, dv) %>%
+    dplyr::summarize (Mean = mean (val),
+                      Err = sd (val)) %>%
+    ungroup() 
+  
+  
+} else if (by_epoch == TRUE & ucm_univar == FALSE) {
+  
+  seg_var <- quo(segm)
+  plot.df <- ima_dev %>% # ima_dev for obs, resid.df for fitted
+    mutate (task = str_remove (task, "_ln")) %>%
+   mutate (segm = str_replace_all (segm, 
+                               c("pelvic" = "Pelvis",
+                               "trunk" = "Trunk"))) %>%
+    mutate (Group = factor (group, levels = c("con", "rlbp", "clbp"), labels = c("con", "rLBP", "cLBP"))) %>%
+    dplyr::group_by(Group, task, !!seg_var, epoch2, dv) %>%
+    dplyr::summarize (Mean = mean (val),
+                      Err = sd (val)) %>%
+    ungroup() 
+  
+} else {
+  
+  seg_var <- quo(segm)
+  plot.df <- ima_dev %>% # ima_dev for obs, resid.df for fitted
+    mutate (task = str_remove (task, "_ln")) %>%
+     mutate (segm = str_replace_all (segm, 
+                             c("pelvic" = "Pelvis",
+                             "trunk" = "Trunk"))) %>%
+    mutate (Group = factor (group, levels = c("con", "rlbp", "clbp"), labels = c("con", "rLBP", "cLBP"))) %>%
+    dplyr::group_by(Group, task, !!seg_var, dv) %>%
+    dplyr::summarize (Mean = mean (val),
+                      Err = sd (val)) %>%
+    ungroup()
+  
+}
+
+```
+
+
+### IMA (figure 4)
+
+```{r}
+
+facet_var <-  quos(segm, epoch2) # change to kinem if univariate analysis
+
+p1 <-   plot_ucm(df = plot.df, outcome = "S_trans", ylabel = "IMA", facet_var = facet_var)
+
+p1
+
+
+p2 <- ima_dev %>%
+    filter (dv == "S_trans") %>%
+    mutate (task = str_remove (task, "_ln")) %>%
+    mutate (segm = str_replace_all (segm, 
+                               c("pelvic" = "Pelvis",
+                               "trunk" = "Trunk"))) %>%
+    group_by(task, segm) %>%
+    dplyr::summarize (Mean = mean (val),
+                    Err = sd (val)) %>%
+    ggplot () + 
+    geom_bar (aes (x = task, y = Mean), fill = "black", color = "black", 
+              position = position_dodge(width = 0.9), stat = "identity") +
+    geom_errorbar(aes (x =task, ymin = Mean, ymax = Mean + Err), 
+                  position = position_dodge(width = 0.9), stat = "identity", width = 0.3) +
+    facet_wrap( ~ segm, nrow = 1) + 
+    xlab ("Task") +
+    ylab ("IMA") +
+    theme_half_open() + 
+    theme(text = element_text(size=20)) +
+  guides (color = FALSE)
+
+legend <- get_legend(p1+
+                       guides(color = guide_legend(nrow = 1)) +
+                       theme(legend.direction = "horizontal",legend.justification="center" ,legend.box.just = "bottom"))
+
+
+p3 <-  plot_grid(p1+ theme(legend.position="none"), 
+                legend, ncol = 1, rel_heights = c(1, .1))
+
+
+
+p <- cowplot::plot_grid(p3,
+                        p2, 
+                        labels = c("a", "b"),
+                        hjust = -1,
+                        nrow = 2)
+
+p 
+# tiff("./../../fig/figure 4.tiff", width = 10, height = 8, units = 'in', res = 300, compression = 'none')
+# p
+# dev.off()
+
+
+```
+
+
+### GEV (figure 5)
+
+```{r}
+
+p1 <-   plot_ucm(df = plot.df, outcome = "GEV", ylabel = "GEV", facet_var = facet_var)
+
+p2 <- ima_dev %>%
+    filter (dv == "GEV") %>%
+    mutate (task = str_remove (task, "_ln")) %>%
+    mutate (segm = str_replace_all (segm, 
+                               c("pelvic" = "Pelvis",
+                               "trunk" = "Trunk"))) %>%
+    group_by(segm, task, epoch2) %>%
+    dplyr::summarize (Mean = mean (val),
+                    Err = sd (val)) %>%
+    ggplot () + 
+    geom_bar (aes (x = task, y = Mean), fill = "black", color = "black",
+              position = position_dodge(width = 0.9), stat = "identity") +
+    geom_errorbar(aes (x = task, ymin = Mean, ymax = Mean + Err), 
+                  position = position_dodge(width = 0.9), stat = "identity", width = 0.3) +
+    facet_wrap(segm ~ epoch2, nrow = 1) + 
+    xlab ("Phase") +
+    ylab ("GEV") +
+    theme_half_open() + 
+    theme(text = element_text(size=20)) 
+
+legend <- get_legend(p1+
+                       guides(color = guide_legend(nrow = 1)) +
+                       theme(legend.direction = "horizontal",legend.justification="center" ,legend.box.just = "bottom"))
+
+
+p3 <-  plot_grid(p1+ theme(legend.position="none"), 
+                legend, ncol = 1, rel_heights = c(1, .1))
+
+
+
+p <- cowplot::plot_grid(p3,
+                        p2, 
+                        labels = c("a", "b"),
+                        hjust = -1,
+                        nrow = 2)
+p
+# tiff("./../../fig/figure 5.tiff", width = 10, height = 8, units = 'in', res = 300, compression = 'none')
+# p
+# dev.off()
+
+```
+
+
+### NGEV (figure 6)
+
+
+```{r}
+
+p1 <-   plot_ucm(df = plot.df, outcome = "NGEV", ylabel = "NGEV", facet_var = facet_var)
+p2 <- ima_dev %>%
+    filter (dv == "NGEV") %>%
+    mutate (task = str_remove (task, "_ln")) %>%
+    mutate (segm = str_replace_all (segm, 
+                               c("pelvic" = "Pelvis",
+                               "trunk" = "Trunk"))) %>%
+    group_by(segm, task, epoch2) %>%
+    dplyr::summarize (Mean = mean (val),
+                    Err = sd (val)) %>%
+    ggplot () + 
+    geom_bar (aes (x = task, y = Mean), fill = "black", color = "black",
+              position = position_dodge(width = 0.9), stat = "identity") +
+    geom_errorbar(aes (x = task, ymin = Mean, ymax = Mean + Err), 
+                  position = position_dodge(width = 0.9), stat = "identity", width = 0.3) +
+    facet_wrap(segm ~ epoch2, nrow = 1) + 
+    xlab ("Phase") +
+    ylab ("NGEV") +
+    theme_half_open() + 
+    theme(text = element_text(size=20)) 
+
+legend <- get_legend(p1+
+                       guides(color = guide_legend(nrow = 1)) +
+                       theme(legend.direction = "horizontal",legend.justification="center" ,legend.box.just = "bottom"))
+
+p3 <-  plot_grid(p1+ theme(legend.position="none"), 
+                legend, ncol = 1, rel_heights = c(1, .1))
+
+p <- cowplot::plot_grid(p3,
+                        p2, 
+                        labels = c("a", "b"),
+                        hjust = -1,
+                        nrow = 2)
+
+p
+# tiff("./../../fig/figure 6.tiff", width = 10, height = 8, units = 'in', res = 300, compression = 'none')
+# p
+# dev.off()
+```
+
+
+### GEV & NGEV -deviation 
+
+```{r fig.height=8, fig.width=10}
+
+
+p1 <-   plot_ucm(df = plot.df, outcome = "ucm_dev", ylabel = expression (f[GE]), facet_var = facet_var)
+p2 <-   plot_ucm(df = plot.df, outcome = "ort_dev", ylabel = expression (f[NGE]), facet_var = facet_var)
+
+legend <- get_legend(p1+
+                       guides(color = guide_legend(nrow = 1)) +
+                       theme(legend.direction = "horizontal",legend.justification="center" ,legend.box.just = "bottom"))
+
+p <- cowplot::plot_grid(p1+ theme(legend.position="none", axis.title.x = element_blank(), axis.text.x=element_blank()),
+                        p2+ theme(legend.position="none"), 
+                        labels = c("a", "b"),
+                        hjust = -1,
+                        align = "v",
+                        nrow = 2)
+
+p <-  plot_grid(p, legend, ncol = 1, rel_heights = c(1, .1))
+p
+
+
+# tiff("./../../fig/suppl_fig_devBygroup.tiff", width = 8, height = 8, units = 'in', res = 300, compression = 'none')
+# p
+# dev.off()
+
+```

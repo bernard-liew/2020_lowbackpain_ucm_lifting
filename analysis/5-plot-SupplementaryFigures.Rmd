@@ -1,0 +1,234 @@
+---
+title: "5-plot SupplementaryFigures"
+author: "bernard-liew"
+date: "2020-06-09"
+output: workflowr::wflow_html
+editor_options:
+  chunk_output_type: console
+---
+
+## Load library
+
+```{r message=FALSE, warning=FALSE}
+
+rm (list = ls())
+
+library(tidyverse)
+library (cowplot)
+
+```
+
+## Plot EMG
+
+```{r message=FALSE, warning=FALSE}
+
+df.plot <- readRDS("output/suppl_plot.RDS")
+
+######################### Plot muscle activations ########################################
+
+ms.ord <-  c("TA","SOL", "GL", "VL","RF" , "BicepsF", "ST", 
+             "GMax", "EO", "Longis","Ileoc", "LatsD",  "BicepsB",  "Delt")
+
+leg <- c("TA","SOL", "GL", "VL","RF" , "BicepsF", "ST")
+
+ms.plot <- df.plot [grepl ("ms", names (df.plot))] %>%
+  bind_rows(.id = "var") %>%
+  mutate (phase = ifelse (grepl ("LIFT", var), "lift", "lower"),
+          muscle = str_replace_all(var, c("ms|_LIFT.ln|_LOWER.ln"), "")) %>%
+  select (subj, grp, phase, muscle, everything ()) %>%
+  mutate (phase = factor (phase, levels = c ("lift", "lower")),
+          muscle = factor (muscle, levels = ms.ord),
+          grp = factor (grp, levels = c("con", "rlbp", "clbp"), labels = c("con", "rLBP", "cLBP")))%>%
+  gather (c(V1:V101), key = cycle, value = emg) %>%
+  mutate (cycle = str_remove(cycle, "V") %>% as.numeric ()) %>%
+  group_by(grp, phase, muscle, cycle) %>%
+  summarise(emg = mean (emg)) %>%
+  ungroup() 
+
+# Leg muscles
+
+p1 <- ggplot (ms.plot %>% filter (muscle %in% leg)) +
+  geom_line (aes (x = cycle, y = emg, colour = grp)) +
+  facet_wrap(muscle ~ phase, ncol = 2, scales = "free_y") +
+  scale_colour_manual(values = c("black","blue", "red")) +
+  labs (x = "Cycle (0-100%)",
+        y = "% of intra-trial max EMG",
+        colour = "Group") +
+  # Manually create values to expand the scale, by finding "pretty" 
+  # values that are slightly larger than the range of y-axis values 
+  # within each facet; set alpha = 0 since they aren't meant to be seen
+  geom_point(data = . %>% 
+               group_by(muscle , phase) %>% #group by facet variable
+               summarise(y.min = pretty(emg)[1],
+                         y.max = pretty(emg)[length(pretty(emg))]) %>%
+               tidyr::gather(key, value, -muscle, -phase), 
+             aes(x = 1, y = value),
+             inherit.aes = FALSE, alpha = 0) +
+  # Turn off automatical scale expansion, & manually set scale breaks
+  # as an evenly spaced sequence (with the "pretty" values created above
+  # providing the limits for each facet). If there are many facets to
+  # show, I recommend no more than 3 labels in each facet, to keep things
+  # simple.
+  scale_y_continuous(breaks = function(x) seq(from = x[1], 
+                                              to = x[2], 
+                                              length.out = 3), 
+                     expand = c(0, 0)) +
+  theme_half_open()
+
+# Hip, trunk, upper limb muscles
+
+p2 <- ggplot (ms.plot %>% filter (!muscle %in% leg)) +
+  geom_line (aes (x = cycle, y = emg, colour = grp)) +
+  facet_wrap(muscle ~ phase, ncol = 2, scales = "free_y") +
+  scale_colour_manual(values = c("black","blue", "red")) +
+  labs (x = "Cycle (0-100%)",
+        y = "% of intra-trial max EMG",
+        colour = "Group") +
+    # Manually create values to expand the scale, by finding "pretty" 
+  # values that are slightly larger than the range of y-axis values 
+  # within each facet; set alpha = 0 since they aren't meant to be seen
+  geom_point(data = . %>% 
+               group_by(muscle , phase) %>% #group by facet variable
+               summarise(y.min = pretty(emg)[1],
+                         y.max = pretty(emg)[length(pretty(emg))]) %>%
+               tidyr::gather(key, value, -muscle, -phase), 
+             aes(x = 1, y = value),
+             inherit.aes = FALSE, alpha = 0) +
+  # Turn off automatical scale expansion, & manually set scale breaks
+  # as an evenly spaced sequence (with the "pretty" values created above
+  # providing the limits for each facet). If there are many facets to
+  # show, I recommend no more than 3 labels in each facet, to keep things
+  # simple.
+  scale_y_continuous(breaks = function(x) seq(from = x[1], 
+                                              to = x[2], 
+                                              length.out = 3), 
+                     expand = c(0, 0)) +
+  theme_half_open()
+
+p1
+p2
+# tiff("../../fig/suppl_fig_ms1.tiff", width = 8, height = 10, units = 'in', res = 300, compression = 'none')
+# p1
+# dev.off()
+# 
+# tiff("../../fig/suppl_fig_ms2.tiff", width = 8, height = 10, units = 'in', res = 300, compression = 'none')
+# p2
+# dev.off()
+
+```
+
+
+## Plot kinematics
+
+```{r}
+
+######################### Plot kinematics ########################################
+
+kin.ord <-  c("PELVIC","RACR")
+
+vert <- "vert"
+
+
+kin.plot <- df.plot [grepl ("DISPL", names (df.plot))] %>%
+  bind_rows(.id = "var") %>%
+  mutate (phase = ifelse (grepl ("LIFT", var), "lift", "lower"),
+          region = str_replace_all(var, c("_.*"), ""),
+          region = ifelse (region == "Mid", "Mid_Shd", region),
+          direction = ifelse(grepl ("AP", var), "ap", "vert")) %>%
+  select (subj, grp, phase, region, direction, everything ()) %>%
+  filter (region %in% kin.ord) %>%
+  mutate (phase = factor (phase, levels = c ("lift", "lower")),
+          region = factor (region, levels = kin.ord, labels = c("Pelvis", "Trunk") ),
+          direction = factor (direction, levels = c("ap", "vert")),
+          grp = factor (grp, levels = c("con", "rlbp", "clbp"), labels = c("con", "rLBP", "cLBP"))) %>%
+  gather (c(V1:V101), key = cycle, value = displ) %>%
+  mutate (cycle = str_remove(cycle, "V") %>% as.numeric ()) %>%
+  group_by(grp, phase, region, phase, direction, cycle) %>%
+  summarise(displ = mean (displ)) %>%
+  ungroup()
+
+# Vertical direction plot
+
+p1 <- kin.plot %>%
+  filter (direction == "vert") %>%
+  ggplot () +
+  geom_line (aes (x = cycle, y = displ, colour = grp)) +
+  facet_wrap(region ~ phase, ncol = 6, scales = "free_y") +
+  scale_colour_manual(values = c("black", "blue", "red")) +
+  labs (x = "Cycle (0-100%)",
+        y = "Displacement (m)",
+        colour = "Group") +
+  # Manually create values to expand the scale, by finding "pretty" 
+  # values that are slightly larger than the range of y-axis values 
+  # within each facet; set alpha = 0 since they aren't meant to be seen
+  geom_point(data = . %>% 
+               group_by(region , phase) %>% #group by facet variable
+               summarise(y.min = pretty(displ)[1],
+                         y.max = pretty(displ)[length(pretty(displ))]) %>%
+               tidyr::gather(key, value, -region, -phase), 
+             aes(x = 1, y = value),
+             inherit.aes = FALSE, alpha = 0) +
+  # Turn off automatical scale expansion, & manually set scale breaks
+  # as an evenly spaced sequence (with the "pretty" values created above
+  # providing the limits for each facet). If there are many facets to
+  # show, I recommend no more than 3 labels in each facet, to keep things
+  # simple.
+  scale_y_continuous(breaks = function(x) seq(from = x[1], 
+                                              to = x[2], 
+                                              length.out = 3), 
+                     expand = c(0, 0),
+                     labels = scales::number_format(accuracy = 0.01)) +
+  theme_half_open()
+
+# AP direction plot
+
+p2 <- kin.plot %>%
+  filter (direction == "ap") %>%
+  ggplot () +
+  geom_line (aes (x = cycle, y = displ, colour = grp)) +
+  facet_wrap(region ~ phase, ncol = 6, scales = "free_y") +
+  scale_colour_manual(values = c("black", "blue", "red")) +
+  labs (x = "Cycle (0-100%)",
+        y = "Displacement (m)",
+        colour = "Group") +
+  # Manually create values to expand the scale, by finding "pretty" 
+  # values that are slightly larger than the range of y-axis values 
+  # within each facet; set alpha = 0 since they aren't meant to be seen
+  geom_point(data = . %>% 
+               group_by(region , phase) %>% #group by facet variable
+               summarise(y.min = pretty(displ)[1],
+                         y.max = pretty(displ)[length(pretty(displ))]) %>%
+               tidyr::gather(key, value, -region, -phase), 
+             aes(x = 1, y = value),
+             inherit.aes = FALSE, alpha = 0) +
+  # Turn off automatical scale expansion, & manually set scale breaks
+  # as an evenly spaced sequence (with the "pretty" values created above
+  # providing the limits for each facet). If there are many facets to
+  # show, I recommend no more than 3 labels in each facet, to keep things
+  # simple.
+  scale_y_continuous(breaks = function(x) seq(from = x[1], 
+                                              to = x[2], 
+                                              length.out = 3), 
+                     expand = c(0, 0),
+                     labels = scales::number_format(accuracy = 0.01))+
+  theme_half_open()
+
+
+legend <- get_legend(p1+
+                       guides(color = guide_legend(nrow = 1)) +
+                       theme(legend.direction = "horizontal",legend.justification="center" ,legend.box.just = "bottom"))
+
+p <- cowplot::plot_grid(p1+ theme(legend.position="none", axis.title.x = element_blank()),
+                        p2+ theme(legend.position="none"), 
+                        labels = c("a", "b"),
+                        hjust = -1,
+                        nrow = 2)
+
+p <-  plot_grid(p, legend, ncol = 1, rel_heights = c(1, .1))
+
+tiff("../../fig/suppl_fig_kine.tiff", width = 7, height = 5, units = 'in', res = 200, compression = 'none')
+p
+dev.off()
+
+
+```
