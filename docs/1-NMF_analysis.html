@@ -13,7 +13,7 @@
 
 <meta name="date" content="2020-06-09" />
 
-<title>5-plot SupplementaryFigures</title>
+<title>1-NMF_analysis</title>
 
 <script src="site_libs/jquery-1.11.3/jquery.min.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -378,7 +378,7 @@ div.tocify {
 
 
 
-<h1 class="title toc-ignore">5-plot SupplementaryFigures</h1>
+<h1 class="title toc-ignore">1-NMF_analysis</h1>
 <h4 class="author">bernard-liew</h4>
 <h4 class="date">2020-06-09</h4>
 
@@ -556,7 +556,7 @@ Note that any generated files, e.g. HTML, png, CSS, etc., are not included in t
 <div id="versions" class="tab-pane fade">
 
 <p>
-These are the previous versions of the repository in which changes were made to the R Markdown (<code>analysis/5-plot-SupplementaryFigures.Rmd</code>) and HTML (<code>docs/5-plot-SupplementaryFigures.html</code>) files. If you’ve configured a remote Git repository (see <code>?wflow_git_remote</code>), click on the hyperlinks in the table below to view the files as they were in that past version.
+These are the previous versions of the repository in which changes were made to the R Markdown (<code>analysis/1-NMF_analysis.Rmd</code>) and HTML (<code>docs/1-NMF_analysis.html</code>) files. If you’ve configured a remote Git repository (see <code>?wflow_git_remote</code>), click on the hyperlinks in the table below to view the files as they were in that past version.
 </p>
 <div class="table-responsive">
 <table class="table table-condensed table-hover">
@@ -582,27 +582,10 @@ Message
 <tbody>
 <tr>
 <td>
-html
-</td>
-<td>
-<a href="https://rawcdn.githack.com/bernard-liew/2020_lowbackpain_ucm_lifting/23621f9609e7ec10cce9ab7e49ccff3a1bd3cb02/docs/5-plot-SupplementaryFigures.html" target="_blank">23621f9</a>
-</td>
-<td>
-bernard-liew
-</td>
-<td>
-2020-06-09
-</td>
-<td>
-Build site.
-</td>
-</tr>
-<tr>
-<td>
 Rmd
 </td>
 <td>
-<a href="https://github.com/bernard-liew/2020_lowbackpain_ucm_lifting/blob/c48958e9f4b94521705c092a365493ac57535c12/analysis/5-plot-SupplementaryFigures.Rmd" target="_blank">c48958e</a>
+<a href="https://github.com/bernard-liew/2020_lowbackpain_ucm_lifting/blob/e2f1c9b1a00c04376ffbf2d3fce4fd209b8fcf6c/analysis/1-NMF_analysis.Rmd" target="_blank">e2f1c9b</a>
 </td>
 <td>
 bernard-liew
@@ -611,7 +594,7 @@ bernard-liew
 2020-06-09
 </td>
 <td>
-Added UCM codes
+Added UCM codes and plots
 </td>
 </tr>
 </tbody>
@@ -621,221 +604,344 @@ Added UCM codes
 </div>
 </div>
 </div>
-<div id="load-library" class="section level2">
-<h2>Load library</h2>
-<pre class="r"><code>rm (list = ls())
+<div id="load-packages" class="section level2">
+<h2>Load packages</h2>
+<pre class="r"><code># Clear workspace
+rm (list = ls ())
 
-library(tidyverse)
-library (cowplot)</code></pre>
+# Helper packages
+library (tidyverse)
+library (doParallel)
+library (magrittr)
+library (broom)
+
+# Plotting
+library (cowplot)
+library(&quot;viridis&quot;) 
+
+# Statistics
+library (NMF)
+library (pracma)
+library (emmeans)
+library (mgcv)
+library (pammtools)
+library (lme4)
+
+# Custom functions
+source (&quot;code/ucm4.R&quot;)</code></pre>
 </div>
-<div id="plot-emg" class="section level2">
-<h2>Plot EMG</h2>
-<pre class="r"><code>df.plot &lt;- readRDS(&quot;output/suppl_plot.RDS&quot;)
+<div id="load-workspace-to-get-raw-data-and-results" class="section level2">
+<h2>Load workspace to get raw data and results</h2>
+<pre class="r"><code>output &lt;- &quot;output&quot;
 
-######################### Plot muscle activations ########################################
+# original emg data
+df.mat &lt;- readRDS(&quot;output/emg_dat.RDS&quot;)
+displ &lt;- readRDS(&quot;output/kinem_dat.RDS&quot;)
 
-ms.ord &lt;-  c(&quot;TA&quot;,&quot;SOL&quot;, &quot;GL&quot;, &quot;VL&quot;,&quot;RF&quot; , &quot;BicepsF&quot;, &quot;ST&quot;, 
-             &quot;GMax&quot;, &quot;EO&quot;, &quot;Longis&quot;,&quot;Ileoc&quot;, &quot;LatsD&quot;,  &quot;BicepsB&quot;,  &quot;Delt&quot;)
+ms.ord &lt;- c(&quot;msTA&quot;, &quot;msSOL&quot;, &quot;msGL&quot;, &quot;msVL&quot;, &quot;msRF&quot;, &quot;msBicepsF&quot;, &quot;msST&quot;, &quot;msGMax&quot;,
+           &quot;msEO&quot; , &quot;msLongis&quot; ,&quot;msIleoc&quot;  , &quot;msLatsD&quot;   ,&quot;msBicepsB&quot; ,&quot;msDelt&quot;)  
 
-leg &lt;- c(&quot;TA&quot;,&quot;SOL&quot;, &quot;GL&quot;, &quot;VL&quot;,&quot;RF&quot; , &quot;BicepsF&quot;, &quot;ST&quot;)
+phase.ord &lt;- c(&quot;lift_ln&quot;, &quot;lower_ln&quot;)</code></pre>
+</div>
+<div id="nmf-analysis" class="section level2">
+<h2>NMF analysis</h2>
+<div id="perform-nmf" class="section level3">
+<h3>Perform NMF</h3>
+<pre class="r"><code>###################### Standard nmf ################################
 
-ms.plot &lt;- df.plot [grepl (&quot;ms&quot;, names (df.plot))] %&gt;%
-  bind_rows(.id = &quot;var&quot;) %&gt;%
-  mutate (phase = ifelse (grepl (&quot;LIFT&quot;, var), &quot;lift&quot;, &quot;lower&quot;),
-          muscle = str_replace_all(var, c(&quot;ms|_LIFT.ln|_LOWER.ln&quot;), &quot;&quot;)) %&gt;%
-  select (subj, grp, phase, muscle, everything ()) %&gt;%
-  mutate (phase = factor (phase, levels = c (&quot;lift&quot;, &quot;lower&quot;)),
-          muscle = factor (muscle, levels = ms.ord),
-          grp = factor (grp, levels = c(&quot;con&quot;, &quot;rlbp&quot;, &quot;clbp&quot;), labels = c(&quot;con&quot;, &quot;rLBP&quot;, &quot;cLBP&quot;)))%&gt;%
-  gather (c(V1:V101), key = cycle, value = emg) %&gt;%
-  mutate (cycle = str_remove(cycle, &quot;V&quot;) %&gt;% as.numeric ()) %&gt;%
-  group_by(grp, phase, muscle, cycle) %&gt;%
-  summarise(emg = mean (emg)) %&gt;%
-  ungroup() 
+nmf_done &lt;- TRUE
 
-# Leg muscles
+if (nmf_done == FALSE) {
+  
+  # do NMF
+  
+  doParallel::registerDoParallel(7)
+  
+  # do for each lifting phase and safe separately
+  for (n in seq_along(phase.ord)) {
+    
+    nmf_dat &lt;- df.mat[[n]]
+    nsubj &lt;- length (nmf_dat)
+    
+    ############### Iterate over 6 factors ########################
+    syn &lt;- 
+      foreach (m = 1:6) %:% # synergy max number = 6
+        foreach (p = 1: nsubj) %dopar%{  
+          NMF::nmf (nmf_dat [[p]], rank = m, method = &quot;lee&quot;)
+        }
+    
+    saveRDS(syn, file = file.path(&quot;output&quot;, paste0(phase.ord[n], &quot;.rds&quot;)))
+  }
+  
+    
+    # read in NMF of each lift phase and merge
+    list_nmf &lt;- list()
 
-p1 &lt;- ggplot (ms.plot %&gt;% filter (muscle %in% leg)) +
-  geom_line (aes (x = cycle, y = emg, colour = grp)) +
-  facet_wrap(muscle ~ phase, ncol = 2, scales = &quot;free_y&quot;) +
-  scale_colour_manual(values = c(&quot;black&quot;,&quot;blue&quot;, &quot;red&quot;)) +
-  labs (x = &quot;Cycle (0-100%)&quot;,
-        y = &quot;% of intra-trial max EMG&quot;,
-        colour = &quot;Group&quot;) +
-  # Manually create values to expand the scale, by finding &quot;pretty&quot; 
-  # values that are slightly larger than the range of y-axis values 
-  # within each facet; set alpha = 0 since they aren&#39;t meant to be seen
-  geom_point(data = . %&gt;% 
-               group_by(muscle , phase) %&gt;% #group by facet variable
-               summarise(y.min = pretty(emg)[1],
-                         y.max = pretty(emg)[length(pretty(emg))]) %&gt;%
-               tidyr::gather(key, value, -muscle, -phase), 
-             aes(x = 1, y = value),
-             inherit.aes = FALSE, alpha = 0) +
-  # Turn off automatical scale expansion, &amp; manually set scale breaks
-  # as an evenly spaced sequence (with the &quot;pretty&quot; values created above
-  # providing the limits for each facet). If there are many facets to
-  # show, I recommend no more than 3 labels in each facet, to keep things
-  # simple.
-  scale_y_continuous(breaks = function(x) seq(from = x[1], 
-                                              to = x[2], 
-                                              length.out = 3), 
-                     expand = c(0, 0)) +
-  theme_half_open()
+    for (n in seq_along(phase.ord)) {
+      list_nmf[[n]] &lt;- readRDS(file = file.path(&quot;output&quot;, paste0(phase.ord[n], &quot;.rds&quot;)))
+      }
 
-# Hip, trunk, upper limb muscles
+    for (n in seq_along(phase.ord)) {
+      for (m in 1:6) {
+        names (list_nmf[[n]][[m]]) &lt;- names (df.mat[[n]])
+        }
+      }
 
-p2 &lt;- ggplot (ms.plot %&gt;% filter (!muscle %in% leg)) +
-  geom_line (aes (x = cycle, y = emg, colour = grp)) +
-  facet_wrap(muscle ~ phase, ncol = 2, scales = &quot;free_y&quot;) +
-  scale_colour_manual(values = c(&quot;black&quot;,&quot;blue&quot;, &quot;red&quot;)) +
-  labs (x = &quot;Cycle (0-100%)&quot;,
-        y = &quot;% of intra-trial max EMG&quot;,
-        colour = &quot;Group&quot;) +
-    # Manually create values to expand the scale, by finding &quot;pretty&quot; 
-  # values that are slightly larger than the range of y-axis values 
-  # within each facet; set alpha = 0 since they aren&#39;t meant to be seen
-  geom_point(data = . %&gt;% 
-               group_by(muscle , phase) %&gt;% #group by facet variable
-               summarise(y.min = pretty(emg)[1],
-                         y.max = pretty(emg)[length(pretty(emg))]) %&gt;%
-               tidyr::gather(key, value, -muscle, -phase), 
-             aes(x = 1, y = value),
-             inherit.aes = FALSE, alpha = 0) +
-  # Turn off automatical scale expansion, &amp; manually set scale breaks
-  # as an evenly spaced sequence (with the &quot;pretty&quot; values created above
-  # providing the limits for each facet). If there are many facets to
-  # show, I recommend no more than 3 labels in each facet, to keep things
-  # simple.
-  scale_y_continuous(breaks = function(x) seq(from = x[1], 
-                                              to = x[2], 
-                                              length.out = 3), 
-                     expand = c(0, 0)) +
-  theme_half_open()
+    names (list_nmf) &lt;- phase.ord
+    
+    # save merged nmf results
+    saveRDS(list_nmf, &quot;output/nmf_res.RDS&quot;)
+  
+  
+  
+} else {
+  
+  list_nmf &lt;- readRDS(&quot;output/nmf_res.RDS&quot;)
+  
+  }</code></pre>
+</div>
+<div id="calculate-variance-accounted-for-vaf" class="section level3">
+<h3>Calculate Variance accounted for (VAF)</h3>
+<pre class="r"><code>###################### Calculate vaf################################
+vaf_list &lt;- list ()
+vaf_list2 &lt;- list ()
 
-p1</code></pre>
-<p><img src="figure/5-plot-SupplementaryFigures.Rmd/unnamed-chunk-2-1.png" width="672" style="display: block; margin: auto;" /></p>
-<pre class="r"><code>p2</code></pre>
-<p><img src="figure/5-plot-SupplementaryFigures.Rmd/unnamed-chunk-2-2.png" width="672" style="display: block; margin: auto;" /></p>
-<pre class="r"><code># tiff(&quot;../../fig/suppl_fig_ms1.tiff&quot;, width = 8, height = 10, units = &#39;in&#39;, res = 300, compression = &#39;none&#39;)
-# p1
-# dev.off()
-# 
-# tiff(&quot;../../fig/suppl_fig_ms2.tiff&quot;, width = 8, height = 10, units = &#39;in&#39;, res = 300, compression = &#39;none&#39;)
-# p2
+nsubj &lt;- map_dbl(df.mat, length)
+
+for (n in seq_along(phase.ord)) {
+  
+  df &lt;- list_nmf[[n]]
+  targ &lt;- df.mat[[n]]
+  
+  for (m in 1:6) {
+    
+    vaf &lt;- pmap (list (object = df[[m]],target = targ),evar)
+    vaf_list2 [[m]] &lt;- vaf
+  }
+  
+  vaf_list [[n]] &lt;- vaf_list2
+}
+
+
+vaf_df &lt;- list()
+for (n in seq_along(phase.ord)) {
+  
+  temp &lt;- map (vaf_list[[n]], unlist)
+  names (temp) = paste0(&quot;comp&quot;, c(1:6))
+  temp  &lt;- bind_rows(temp)
+  temp$subj &lt;- c (1:nsubj[n])
+  vaf_df[[n]] &lt;- temp
+}
+
+names (vaf_df) &lt;- phase.ord
+vaf_df &lt;- bind_rows(vaf_df, .id = &quot;task&quot;)</code></pre>
+</div>
+<div id="plot-vaf-to-mode-number" class="section level3">
+<h3>Plot VAF to mode number</h3>
+<pre class="r"><code># Increment in VAF per factor
+
+comp &lt;- vaf_df %&gt;%
+  gather (c(comp1:comp6), key = syn_no, value = vaf) %&gt;%
+  mutate (syn_no = str_remove(syn_no, &quot;comp&quot;) %&gt;% as.numeric) %&gt;%
+  arrange(task, subj, syn_no ) %&gt;%
+  group_by(task, subj) %&gt;%
+  mutate(vaf_lag = dplyr::lag (vaf, n = 1, default = NA),
+         vaf_diff = (vaf - vaf_lag)*100) %&gt;%
+  ungroup () %&gt;%
+  mutate (task = str_remove (task, &quot;_ln&quot;),
+          Subject = factor (subj)) %&gt;%
+  na.omit() %&gt;%
+  ungroup ()
+  
+c &lt;- comp %&gt;%
+  ggplot (aes(x = syn_no, y = vaf_diff, color = Subject),  size = 1) +
+  geom_line() +
+  scale_colour_viridis(discrete = TRUE, option = &quot;D&quot;)+
+  facet_wrap(~task) +
+  ylab (&quot;Change in %VAF&quot;) + 
+  xlab (&quot;Number of modes&quot;) +
+  theme_half_open() + 
+  theme(text = element_text(size=20)) +
+  geom_hline(aes (yintercept = 3), linetype = 2)
+
+c</code></pre>
+<p><img src="figure/1-NMF_analysis.Rmd/unnamed-chunk-5-1.png" width="672" style="display: block; margin: auto;" /></p>
+<pre class="r"><code># tiff(&quot;./../../fig/1_w_plot.tiff&quot;, width = 20, height = 10, units = &#39;in&#39;, res = 200, compression = &#39;none&#39;)
+# w.plot
 # dev.off()</code></pre>
 </div>
-<div id="plot-kinematics" class="section level2">
-<h2>Plot kinematics</h2>
-<pre class="r"><code>######################### Plot kinematics ########################################
+<div id="select-final-number-of-modes-for-all-subjects" class="section level3">
+<h3>Select final number of modes for all subjects</h3>
+<pre class="r"><code>nmf_order_done &lt;- TRUE
+comp_no &lt;- 3 # number of synergies
 
-kin.ord &lt;-  c(&quot;PELVIC&quot;,&quot;RACR&quot;)
+if (nmf_order_done == FALSE) {
 
-vert &lt;- &quot;vert&quot;
+  list_nmf_final &lt;- list()
+  
+  # select synergy number
+  for (n in seq_along(phase.ord)) {
+    
+    list_nmf_final[[n]] &lt;- list_nmf[[n]][[comp_no]]
+    
+  }
+  
+  ################### Order synergies #############################
+  
+  set.seed(123)
+  ref_list = list()
+  
+  for (n in seq_along(phase.ord)) {
+    con_vec &lt;- which (grepl (&quot;con&quot;, names (list_nmf_final[[n]])) == TRUE)
+    ref_list[[n]] &lt;- sample(con_vec,1)
+  }
+  
+  ref_list &lt;- unlist(ref_list)
+  
+  
+  list_nmf_final_ord &lt;-  list()
+  
+  for (n in seq_along(phase.ord)) {
+    
+    ref &lt;- ref_list[n]
+    s &lt;- nsubj[n]
+    
+    temp &lt;- list_nmf_final[[n]]
+    temp.ref &lt;- rep (temp [ref], s)
+    list_nmf_final_ord [[n]] &lt;-  pmap (list (syn_ref = temp.ref, syn_ext = temp) , matchSynergies)
+    
+    names (list_nmf_final_ord [[n]]) &lt;- names(temp)
+  }
+  
+  names (list_nmf_final_ord) &lt;-  phase.ord
+  
+  saveRDS (list_nmf_final_ord, &quot;output/nmf_ordered.RDS&quot;)
+  
+} else {
+  
+  list_nmf_final_ord &lt;- readRDS (&quot;output/nmf_ordered.RDS&quot;)
+  
+}</code></pre>
+</div>
+<div id="plot-w-weights-figure-1" class="section level3">
+<h3>Plot W weights (figure 1)</h3>
+<pre class="r"><code>ms.ord &lt;- str_remove (ms.ord, &quot;ms&quot;)
 
 
-kin.plot &lt;- df.plot [grepl (&quot;DISPL&quot;, names (df.plot))] %&gt;%
-  bind_rows(.id = &quot;var&quot;) %&gt;%
-  mutate (phase = ifelse (grepl (&quot;LIFT&quot;, var), &quot;lift&quot;, &quot;lower&quot;),
-          region = str_replace_all(var, c(&quot;_.*&quot;), &quot;&quot;),
-          region = ifelse (region == &quot;Mid&quot;, &quot;Mid_Shd&quot;, region),
-          direction = ifelse(grepl (&quot;AP&quot;, var), &quot;ap&quot;, &quot;vert&quot;)) %&gt;%
-  select (subj, grp, phase, region, direction, everything ()) %&gt;%
-  filter (region %in% kin.ord) %&gt;%
-  mutate (phase = factor (phase, levels = c (&quot;lift&quot;, &quot;lower&quot;)),
-          region = factor (region, levels = kin.ord, labels = c(&quot;Pelvis&quot;, &quot;Trunk&quot;) ),
-          direction = factor (direction, levels = c(&quot;ap&quot;, &quot;vert&quot;)),
-          grp = factor (grp, levels = c(&quot;con&quot;, &quot;rlbp&quot;, &quot;clbp&quot;), labels = c(&quot;con&quot;, &quot;rLBP&quot;, &quot;cLBP&quot;))) %&gt;%
-  gather (c(V1:V101), key = cycle, value = displ) %&gt;%
-  mutate (cycle = str_remove(cycle, &quot;V&quot;) %&gt;% as.numeric ()) %&gt;%
-  group_by(grp, phase, region, phase, direction, cycle) %&gt;%
-  summarise(displ = mean (displ)) %&gt;%
-  ungroup()
+w &lt;-  map(list_nmf_final_ord, ~basis_merge(.)) %&gt;% 
+  map (~mutate (., muscle = rep (ms.ord, nrow(.)/length (ms.ord)))) %&gt;% 
+  bind_rows(.id = &quot;task&quot;)
 
-# Vertical direction plot
+w$subj &lt;- map (list_nmf_final_ord, ~ rep(names (.), each  = 14)) %&gt;% flatten_chr()
+w$grp &lt;- str_remove(w$subj, &quot;_.*&quot;)
 
-p1 &lt;- kin.plot %&gt;%
-  filter (direction == &quot;vert&quot;) %&gt;%
+
+
+#### w plot ###############
+phase.ord.sub &lt;- str_remove (phase.ord, &quot;_ln&quot;)
+w.df &lt;- w %&gt;%
+  gather (c(V1:noquote(paste0(&quot;V&quot;,comp_no))), key = synergy, value = load) %&gt;%
+  mutate (synergy = str_replace(synergy, &quot;V&quot;, &quot;mode &quot;),
+          task = str_remove (task, &quot;_ln&quot;)) %&gt;%
+  mutate (muscle = factor (muscle, levels = ms.ord),
+          grp = factor (grp, levels = c(&quot;con&quot;, &quot;rlbp&quot;, &quot;clbp&quot;), labels =c(&quot;con&quot;, &quot;rLBP&quot;, &quot;cLBP&quot;) ),
+          task = factor (task, levels = phase.ord.sub ),
+          synergy = factor (synergy)) %&gt;%
+  group_by(task, grp, synergy, muscle) %&gt;%
+  summarize (load_mean = mean (load),
+             load_sd = sd (load)) %&gt;%
+  ungroup () 
+
+
+lift_w_ave &lt;- w.df %&gt;%
+  dplyr::filter (task == &quot;lift&quot; &amp; grp == &quot;con&quot;) %&gt;%
+  summarize (mean(load_mean))%&gt;%
+  pull()
+
+
+lower_w_ave &lt;- w.df  %&gt;%
+  filter (task == &quot;lower&quot; &amp; grp == &quot;con&quot;) %&gt;%
+  summarize (mean(load_mean))%&gt;%
+  pull()
+
+
+w.df$h_line &lt;- rep (c(lift_w_ave, lower_w_ave), each = nrow (w.df)/2)
+
+
+
+w.plot &lt;-  w.df %&gt;%
   ggplot () +
-  geom_line (aes (x = cycle, y = displ, colour = grp)) +
-  facet_wrap(region ~ phase, ncol = 6, scales = &quot;free_y&quot;) +
-  scale_colour_manual(values = c(&quot;black&quot;, &quot;blue&quot;, &quot;red&quot;)) +
-  labs (x = &quot;Cycle (0-100%)&quot;,
-        y = &quot;Displacement (m)&quot;,
-        colour = &quot;Group&quot;) +
-  # Manually create values to expand the scale, by finding &quot;pretty&quot; 
-  # values that are slightly larger than the range of y-axis values 
-  # within each facet; set alpha = 0 since they aren&#39;t meant to be seen
-  geom_point(data = . %&gt;% 
-               group_by(region , phase) %&gt;% #group by facet variable
-               summarise(y.min = pretty(displ)[1],
-                         y.max = pretty(displ)[length(pretty(displ))]) %&gt;%
-               tidyr::gather(key, value, -region, -phase), 
-             aes(x = 1, y = value),
-             inherit.aes = FALSE, alpha = 0) +
-  # Turn off automatical scale expansion, &amp; manually set scale breaks
-  # as an evenly spaced sequence (with the &quot;pretty&quot; values created above
-  # providing the limits for each facet). If there are many facets to
-  # show, I recommend no more than 3 labels in each facet, to keep things
-  # simple.
-  scale_y_continuous(breaks = function(x) seq(from = x[1], 
-                                              to = x[2], 
-                                              length.out = 3), 
-                     expand = c(0, 0),
-                     labels = scales::number_format(accuracy = 0.01)) +
-  theme_half_open()
+  geom_bar(aes (x = muscle, y = load_mean, fill = grp, colour = grp), stat = &quot;identity&quot;, 
+           position = position_dodge(width = 0.9)) +
+  geom_errorbar(aes (x = muscle, ymin = load_mean, ymax = load_mean + load_sd, colour = grp), stat = &quot;identity&quot;, 
+                position = position_dodge(width = 0.9), width = 0.3) +
+  ylim(0, 0.35) +
+  geom_hline(aes(yintercept = h_line), linetype = &quot;dashed&quot;) + 
+  facet_wrap(  task ~ synergy  ,  scales = &quot;fixed&quot;) + 
+  ylab  (&quot;Loading&quot;) + 
+  scale_fill_manual(values = c(&quot;black&quot;, &quot;blue&quot;, &quot;red&quot;)) + 
+  scale_colour_manual(values = c(&quot;black&quot;, &quot;blue&quot;, &quot;red&quot;), guide = FALSE) + 
+  theme_half_open() + 
+  theme(text = element_text(size=20),
+        axis.text.x = element_text(angle = 45, hjust = 1))  +
+  labs (fill = &quot;Group&quot;)
 
-# AP direction plot
+w.plot</code></pre>
+<p><img src="figure/1-NMF_analysis.Rmd/unnamed-chunk-7-1.png" width="960" style="display: block; margin: auto;" /></p>
+<pre class="r"><code># tiff(&quot;./../../fig/figure 1.tiff&quot;, width = 20, height = 10, units = &#39;in&#39;, res = 300, compression = &#39;none&#39;)
+# w.plot
+# dev.off()</code></pre>
+</div>
+<div id="plot-h-weights-figure-2" class="section level3">
+<h3>Plot H weights (figure 2)</h3>
+<pre class="r"><code>h &lt;-  map(list_nmf_final_ord, ~coef_merge(.)) %&gt;% 
+  bind_rows(.id = &quot;task&quot;)
 
-p2 &lt;- kin.plot %&gt;%
-  filter (direction == &quot;ap&quot;) %&gt;%
+h$cycle &lt;- as.numeric (rep (c(1:101), length.out = nrow (h)))
+h$rep &lt;- rep (rep (c(1:20), each = 101), length.out = nrow (h))
+h$subj&lt;- map (list_nmf_final_ord, ~ rep(names (.), each  = 101*20)) %&gt;% flatten_chr()
+h$grp &lt;- str_remove(h$subj, &quot;_.*&quot;)
+
+h.df &lt;- h %&gt;%
+  gather (c(V1:noquote(paste0(&quot;V&quot;,comp_no))), key = synergy, value = load) %&gt;%
+  mutate (synergy = str_replace(synergy, &quot;V&quot;, &quot;mode &quot;),
+          cycle = as.numeric (cycle) ,
+          task = factor (task, levels = phase.ord),
+          task = str_remove (task, &quot;_ln&quot;),
+          grp = factor (grp, levels = c(&quot;con&quot;, &quot;rlbp&quot;, &quot;clbp&quot;), 
+                        labels = c(&quot;con&quot;, &quot;rLBP&quot;, &quot;cLBP&quot;))) %&gt;%
+  group_by(grp, task, synergy, cycle) %&gt;%
+  summarize (Mean = mean (load),
+             Sd = sd (load)) %&gt;%
+  ungroup () 
+
+h.plot &lt;- h.df %&gt;%
   ggplot () +
-  geom_line (aes (x = cycle, y = displ, colour = grp)) +
-  facet_wrap(region ~ phase, ncol = 6, scales = &quot;free_y&quot;) +
-  scale_colour_manual(values = c(&quot;black&quot;, &quot;blue&quot;, &quot;red&quot;)) +
-  labs (x = &quot;Cycle (0-100%)&quot;,
-        y = &quot;Displacement (m)&quot;,
-        colour = &quot;Group&quot;) +
-  # Manually create values to expand the scale, by finding &quot;pretty&quot; 
-  # values that are slightly larger than the range of y-axis values 
-  # within each facet; set alpha = 0 since they aren&#39;t meant to be seen
-  geom_point(data = . %&gt;% 
-               group_by(region , phase) %&gt;% #group by facet variable
-               summarise(y.min = pretty(displ)[1],
-                         y.max = pretty(displ)[length(pretty(displ))]) %&gt;%
-               tidyr::gather(key, value, -region, -phase), 
-             aes(x = 1, y = value),
-             inherit.aes = FALSE, alpha = 0) +
-  # Turn off automatical scale expansion, &amp; manually set scale breaks
-  # as an evenly spaced sequence (with the &quot;pretty&quot; values created above
-  # providing the limits for each facet). If there are many facets to
-  # show, I recommend no more than 3 labels in each facet, to keep things
-  # simple.
-  scale_y_continuous(breaks = function(x) seq(from = x[1], 
-                                              to = x[2], 
-                                              length.out = 3), 
-                     expand = c(0, 0),
-                     labels = scales::number_format(accuracy = 0.01))+
-  theme_half_open()
+  geom_line(aes(x = cycle, y = Mean, colour = grp), size = 1.5) +
+  geom_ribbon(aes (x = cycle, ymin = Mean - Sd, ymax = Mean + Sd, fill = grp), alpha = 0.2) + 
+  scale_color_manual(values = c(&quot;black&quot;, &quot;blue&quot;, &quot;red&quot;)) + 
+  scale_fill_manual(values = c(&quot;black&quot;, &quot;blue&quot;, &quot;red&quot;)) + 
+  ylab  (&quot;Weights&quot;) + 
+  xlab (&quot;% cycle&quot;) +
+  facet_wrap(synergy~task, nrow = comp_no, scales = &quot;fixed&quot;) +
+  theme_half_open() + 
+  theme(text = element_text(size=20)) + 
+  labs (colour = &quot;Group&quot;) +
+  guides (fill = FALSE)
 
+h.plot</code></pre>
+<p><img src="figure/1-NMF_analysis.Rmd/unnamed-chunk-8-1.png" width="672" style="display: block; margin: auto;" /></p>
+<pre class="r"><code># tiff(&quot;./../../fig/figure 2.tiff&quot;, width = 8, height = 10, units = &#39;in&#39;, res = 300, compression = &#39;none&#39;)
+# h.plot
+# dev.off()</code></pre>
+</div>
+<div id="combine-synergy-dataframe-with-kinematic-dataframe" class="section level3">
+<h3>Combine synergy dataframe with kinematic dataframe</h3>
+<pre class="r"><code>syn_df &lt;- displ %&gt;%
+  inner_join(h, by = c(&quot;subj&quot;, &quot;task&quot;, &quot;cycle&quot;, &quot;rep&quot;)) %&gt;%
+  select (-reps, -reps2, - trial, -max_rep)
 
-legend &lt;- get_legend(p1+
-                       guides(color = guide_legend(nrow = 1)) +
-                       theme(legend.direction = &quot;horizontal&quot;,legend.justification=&quot;center&quot; ,legend.box.just = &quot;bottom&quot;))
-
-p &lt;- cowplot::plot_grid(p1+ theme(legend.position=&quot;none&quot;, axis.title.x = element_blank()),
-                        p2+ theme(legend.position=&quot;none&quot;), 
-                        labels = c(&quot;a&quot;, &quot;b&quot;),
-                        hjust = -1,
-                        nrow = 2)
-
-p &lt;-  plot_grid(p, legend, ncol = 1, rel_heights = c(1, .1))
-
-tiff(&quot;../../fig/suppl_fig_kine.tiff&quot;, width = 7, height = 5, units = &#39;in&#39;, res = 200, compression = &#39;none&#39;)
-p
-dev.off()</code></pre>
-<pre><code>png 
-  2 </code></pre>
+saveRDS(syn_df, &quot;output/synergy_displ.RDS&quot;)</code></pre>
 <br>
 <p>
 <button type="button" class="btn btn-default btn-workflowr btn-workflowr-sessioninfo" data-toggle="collapse" data-target="#workflowr-sessioninfo" style="display: block;">
@@ -858,29 +964,50 @@ locale:
 [5] LC_TIME=English_United Kingdom.1252    
 
 attached base packages:
-[1] stats     graphics  grDevices utils     datasets  methods   base     
+[1] parallel  stats     graphics  grDevices utils     datasets  methods  
+[8] base     
 
 other attached packages:
- [1] cowplot_1.0.0   forcats_0.4.0   stringr_1.4.0   dplyr_0.8.4    
- [5] purrr_0.3.3     readr_1.3.1     tidyr_1.0.0     tibble_2.1.3   
- [9] ggplot2_3.3.0   tidyverse_1.3.0 workflowr_1.6.1
+ [1] lme4_1.1-21       Matrix_1.2-18     pammtools_0.2.2   mgcv_1.8-31      
+ [5] nlme_3.1-142      emmeans_1.4.3.01  pracma_2.2.9      NMF_0.21.0       
+ [9] cluster_2.1.0     rngtools_1.5      pkgmaker_0.27     registry_0.5-1   
+[13] viridis_0.5.1     viridisLite_0.3.0 cowplot_1.0.0     broom_0.5.4      
+[17] magrittr_1.5      doParallel_1.0.15 iterators_1.0.12  foreach_1.4.7    
+[21] forcats_0.4.0     stringr_1.4.0     dplyr_0.8.4       purrr_0.3.3      
+[25] readr_1.3.1       tidyr_1.0.0       tibble_2.1.3      ggplot2_3.3.0    
+[29] tidyverse_1.3.0   workflowr_1.6.1  
 
 loaded via a namespace (and not attached):
- [1] tidyselect_0.2.5 xfun_0.11        haven_2.2.0      lattice_0.20-38 
- [5] colorspace_1.4-1 vctrs_0.2.1      generics_0.0.2   htmltools_0.4.0 
- [9] yaml_2.2.0       rlang_0.4.4      later_1.0.0      pillar_1.4.3    
-[13] withr_2.1.2      glue_1.3.1       DBI_1.1.0        dbplyr_1.4.2    
-[17] modelr_0.1.5     readxl_1.3.1     lifecycle_0.1.0  munsell_0.5.0   
-[21] gtable_0.3.0     cellranger_1.1.0 rvest_0.3.5      evaluate_0.14   
-[25] labeling_0.3     knitr_1.26       httpuv_1.5.2     fansi_0.4.0     
-[29] broom_0.5.4      Rcpp_1.0.3       promises_1.1.0   backports_1.1.5 
-[33] scales_1.1.0     jsonlite_1.6     farver_2.0.1     fs_1.3.1        
-[37] hms_0.5.2        digest_0.6.23    stringi_1.4.3    grid_3.6.2      
-[41] rprojroot_1.3-2  cli_2.0.1        tools_3.6.2      magrittr_1.5    
-[45] crayon_1.3.4     whisker_0.4      pkgconfig_2.0.3  zeallot_0.1.0   
-[49] ellipsis_0.3.0   xml2_1.2.2       reprex_0.3.0     lubridate_1.7.4 
-[53] rstudioapi_0.11  assertthat_0.2.1 rmarkdown_2.0    httr_1.4.1      
-[57] R6_2.4.1         nlme_3.1-142     git2r_0.26.1     compiler_3.6.2  </code></pre>
+ [1] TH.data_1.0-10      minqa_1.2.4         colorspace_1.4-1   
+ [4] ellipsis_0.3.0      rprojroot_1.3-2     estimability_1.3   
+ [7] fs_1.3.1            rstudioapi_0.11     farver_2.0.1       
+[10] prodlim_2019.11.13  fansi_0.4.0         mvtnorm_1.0-11     
+[13] lubridate_1.7.4     xml2_1.2.2          codetools_0.2-16   
+[16] splines_3.6.2       knitr_1.26          zeallot_0.1.0      
+[19] Formula_1.2-3       jsonlite_1.6        nloptr_1.2.1       
+[22] gridBase_0.4-7      dbplyr_1.4.2        compiler_3.6.2     
+[25] httr_1.4.1          backports_1.1.5     assertthat_0.2.1   
+[28] lazyeval_0.2.2      cli_2.0.1           later_1.0.0        
+[31] htmltools_0.4.0     tools_3.6.2         coda_0.19-3        
+[34] gtable_0.3.0        glue_1.3.1          reshape2_1.4.3     
+[37] Rcpp_1.0.3          cellranger_1.1.0    vctrs_0.2.1        
+[40] xfun_0.11           rvest_0.3.5         lifecycle_0.1.0    
+[43] MASS_7.3-51.5       zoo_1.8-6           scales_1.1.0       
+[46] hms_0.5.2           promises_1.1.0      sandwich_2.5-1     
+[49] RColorBrewer_1.1-2  yaml_2.2.0          gridExtra_2.3      
+[52] stringi_1.4.3       checkmate_1.9.4     boot_1.3-24        
+[55] bibtex_0.4.2.2      lava_1.6.6          rlang_0.4.4        
+[58] pkgconfig_2.0.3     evaluate_0.14       lattice_0.20-38    
+[61] labeling_0.3        tidyselect_0.2.5    plyr_1.8.5         
+[64] R6_2.4.1            generics_0.0.2      multcomp_1.4-11    
+[67] DBI_1.1.0           pillar_1.4.3        haven_2.2.0        
+[70] whisker_0.4         withr_2.1.2         survival_3.1-8     
+[73] modelr_0.1.5        crayon_1.3.4        rmarkdown_2.0      
+[76] timereg_1.9.4       grid_3.6.2          readxl_1.3.1       
+[79] git2r_0.26.1        reprex_0.3.0        digest_0.6.23      
+[82] xtable_1.8-4        httpuv_1.5.2        numDeriv_2016.8-1.1
+[85] pec_2019.11.03      munsell_0.5.0      </code></pre>
+</div>
 </div>
 </div>
 
