@@ -9,3 +9,13 @@ editor_options:
 ---
 
 Welcome to my research website.
+
+[This code performs Nonnegative Matrix Factorization](1-NMF_analysis.html)
+
+[This code performs Uncontrolled manifold analysis](2-UCM_analysis.html)
+
+[This code performs statistical inference](3-inference.html)
+
+[This code performs plots the UCM statistical inference results](4-plot-UCMstatistics.html)
+
+[This code performs plots the supplementary figures](5-plot-SupplementaryFigures.html)
