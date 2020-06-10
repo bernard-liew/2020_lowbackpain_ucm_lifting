@@ -157,6 +157,8 @@ if (ucm_done == FALSE & ucm_univar == FALSE) {
   
 } else if (ucm_done == FALSE & ucm_univar == TRUE) {
   
+  seg_var <- quo(kinem)
+  
   ucm.result <- ucm.df %>%
     ungroup() %>%
     group_by(subj, task, !!seg_var,  cycle) %>%
