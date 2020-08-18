@@ -257,3 +257,17 @@ plot_ucm <- function (df, outcome, ylabel, facet_var) {
 
 
 }
+
+
+wide2long <- function (x) {
+
+  rownames(x) <- ms.ord
+  x %>%
+    as.data.frame() %>%
+    rownames_to_column("muscle") %>%
+    pivot_longer(starts_with("V"),
+                 names_to = "cycle_rep",
+                 values_to = "emg") %>%
+    mutate (cycle = rep (1:101, times = nrow (.)/101)) %>%
+    mutate (muscle = str_remove (muscle, "ms"))
+}

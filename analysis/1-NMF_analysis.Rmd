@@ -119,7 +119,6 @@ if (nmf_done == FALSE) {
 
 ```
 
-
 ### Calculate Variance accounted for (VAF)
 
 ```{r message=FALSE, warning=FALSE}
@@ -191,6 +190,34 @@ c <- comp %>%
 
 c
 
+comp <- vaf_df %>%
+  gather (c(comp1:comp6), key = syn_no, value = vaf) %>%
+  mutate (syn_no = str_remove(syn_no, "comp") %>% as.numeric) %>%
+  arrange(task, subj, syn_no ) %>%
+  mutate (vaf = vaf * 100) %>%
+  # group_by(task, subj) %>%
+  # # mutate(vaf_lag = dplyr::lag (vaf, n = 1, default = NA),
+  # #        vaf_diff = (vaf - vaf_lag)*100) %>%
+  # # ungroup () %>%
+  mutate (task = str_remove (task, "_ln"),
+          Subject = factor (subj)) %>%
+  na.omit() %>%
+  ungroup ()
+
+c <- comp %>%
+  ggplot (aes(x = syn_no, y = vaf, color = Subject),  size = 1) +
+  geom_line() +
+  scale_colour_viridis(discrete = TRUE, option = "D")+
+  facet_wrap(~task) +
+  ylab ("%VAF") + 
+  xlab ("Number of modes") +
+  theme_half_open() + 
+  theme(text = element_text(size=20)) +
+  geom_hline(aes (yintercept = 90), linetype = 2)
+
+
+c
+
 # tiff("./../../fig/1_w_plot.tiff", width = 20, height = 10, units = 'in', res = 200, compression = 'none')
 # w.plot
 # dev.off()
@@ -253,6 +280,59 @@ if (nmf_order_done == FALSE) {
 }
 
 ```
+
+### Create reconstructed EMG based on three modes, and compare to original
+
+```{r}
+
+emg_recon <- list()
+
+# select synergy number
+for (n in seq_along(phase.ord)) {
+  
+  emg_recon[[n]] <- list_nmf[[n]][[comp_no]]
+  
+}
+
+names (emg_recon) <-  phase.ord
+
+
+emg_recon <- emg_recon %>%
+  map (~map (., fitted )) %>%
+  map (~ map (., wide2long)) %>%
+  map (bind_rows, .id = "subj") %>%
+  bind_rows (.id = "task")%>%
+  dplyr::select(-cycle_rep)%>%
+  rename (recon = emg) 
+
+emg_orig <- df.mat %>%
+  map (~ map (., wide2long)) %>%
+  map (bind_rows, .id = "subj") %>%
+  bind_rows (.id = "task")%>%
+  dplyr::select(-cycle_rep)%>%
+  rename (orig = emg)
+
+
+
+emg_compare <- emg_orig %>%
+  inner_join(emg_recon, by = c("task", "subj", "muscle", "cycle")) %>%
+  pivot_longer(cols = c("orig", "recon"), names_to = "type", values_to = "emg") %>%
+  mutate (type = factor (type, levels = c("orig", "recon"), labels = c("original", "reconstructed")),
+          task = str_remove (task, "_ln"),
+          task = factor (task, levels = c("lift", "lower")),
+          grp = ifelse (grepl ("con", subj), 
+                        "con", 
+                        ifelse (grepl ("rlbp", subj), "rLBP", "cLBP")),
+          grp = factor (grp, levels = c("con", "rLBP", "cLBP"))) %>%
+  group_by(grp, task, muscle, cycle, type) %>%
+  summarize (Mean = mean (emg),
+             Sd = sd (emg))
+
+saveRDS(emg_compare , "output/emg_recon.RDS")
+
+
+```
+
 
 ### Plot W weights (figure 1)
 

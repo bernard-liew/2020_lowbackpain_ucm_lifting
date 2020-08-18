@@ -21,99 +21,28 @@ library (cowplot)
 ## Plot EMG
 
 ```{r message=FALSE, warning=FALSE}
-
-df.plot <- readRDS("output/suppl_plot.RDS")
+df.plot <- readRDS("output/emg_recon.RDS")
 
 ######################### Plot muscle activations ########################################
+p <- emg_compare %>%
+  ggplot () +
+  geom_line(aes(x = cycle, y = Mean, colour = grp, linetype = type), size = 1.5) +
+  scale_color_manual(values = c("black", "blue", "red")) + 
+  ylab  ("% of intra-trial max EMG") + 
+  xlab ("% cycle") +
+  facet_wrap(muscle ~ task ,  ncol = 4, scales = "fixed") +
+  theme_half_open() + 
+  theme(text = element_text(size=20)) + 
+  labs (colour = "Group",
+        linetype = "Type") +
+  guides (fill = FALSE)
 
-ms.ord <-  c("TA","SOL", "GL", "VL","RF" , "BicepsF", "ST", 
-             "GMax", "EO", "Longis","Ileoc", "LatsD",  "BicepsB",  "Delt")
 
-leg <- c("TA","SOL", "GL", "VL","RF" , "BicepsF", "ST")
-
-ms.plot <- df.plot [grepl ("ms", names (df.plot))] %>%
-  bind_rows(.id = "var") %>%
-  mutate (phase = ifelse (grepl ("LIFT", var), "lift", "lower"),
-          muscle = str_replace_all(var, c("ms|_LIFT.ln|_LOWER.ln"), "")) %>%
-  select (subj, grp, phase, muscle, everything ()) %>%
-  mutate (phase = factor (phase, levels = c ("lift", "lower")),
-          muscle = factor (muscle, levels = ms.ord),
-          grp = factor (grp, levels = c("con", "rlbp", "clbp"), labels = c("con", "rLBP", "cLBP")))%>%
-  gather (c(V1:V101), key = cycle, value = emg) %>%
-  mutate (cycle = str_remove(cycle, "V") %>% as.numeric ()) %>%
-  group_by(grp, phase, muscle, cycle) %>%
-  summarise(emg = mean (emg)) %>%
-  ungroup() 
-
-# Leg muscles
-
-p1 <- ggplot (ms.plot %>% filter (muscle %in% leg)) +
-  geom_line (aes (x = cycle, y = emg, colour = grp)) +
-  facet_wrap(muscle ~ phase, ncol = 2, scales = "free_y") +
-  scale_colour_manual(values = c("black","blue", "red")) +
-  labs (x = "Cycle (0-100%)",
-        y = "% of intra-trial max EMG",
-        colour = "Group") +
-  # Manually create values to expand the scale, by finding "pretty" 
-  # values that are slightly larger than the range of y-axis values 
-  # within each facet; set alpha = 0 since they aren't meant to be seen
-  geom_point(data = . %>% 
-               group_by(muscle , phase) %>% #group by facet variable
-               summarise(y.min = pretty(emg)[1],
-                         y.max = pretty(emg)[length(pretty(emg))]) %>%
-               tidyr::gather(key, value, -muscle, -phase), 
-             aes(x = 1, y = value),
-             inherit.aes = FALSE, alpha = 0) +
-  # Turn off automatical scale expansion, & manually set scale breaks
-  # as an evenly spaced sequence (with the "pretty" values created above
-  # providing the limits for each facet). If there are many facets to
-  # show, I recommend no more than 3 labels in each facet, to keep things
-  # simple.
-  scale_y_continuous(breaks = function(x) seq(from = x[1], 
-                                              to = x[2], 
-                                              length.out = 3), 
-                     expand = c(0, 0)) +
-  theme_half_open()
-
-# Hip, trunk, upper limb muscles
-
-p2 <- ggplot (ms.plot %>% filter (!muscle %in% leg)) +
-  geom_line (aes (x = cycle, y = emg, colour = grp)) +
-  facet_wrap(muscle ~ phase, ncol = 2, scales = "free_y") +
-  scale_colour_manual(values = c("black","blue", "red")) +
-  labs (x = "Cycle (0-100%)",
-        y = "% of intra-trial max EMG",
-        colour = "Group") +
-    # Manually create values to expand the scale, by finding "pretty" 
-  # values that are slightly larger than the range of y-axis values 
-  # within each facet; set alpha = 0 since they aren't meant to be seen
-  geom_point(data = . %>% 
-               group_by(muscle , phase) %>% #group by facet variable
-               summarise(y.min = pretty(emg)[1],
-                         y.max = pretty(emg)[length(pretty(emg))]) %>%
-               tidyr::gather(key, value, -muscle, -phase), 
-             aes(x = 1, y = value),
-             inherit.aes = FALSE, alpha = 0) +
-  # Turn off automatical scale expansion, & manually set scale breaks
-  # as an evenly spaced sequence (with the "pretty" values created above
-  # providing the limits for each facet). If there are many facets to
-  # show, I recommend no more than 3 labels in each facet, to keep things
-  # simple.
-  scale_y_continuous(breaks = function(x) seq(from = x[1], 
-                                              to = x[2], 
-                                              length.out = 3), 
-                     expand = c(0, 0)) +
-  theme_half_open()
-
-p1
-p2
-# tiff("../../fig/suppl_fig_ms1.tiff", width = 8, height = 10, units = 'in', res = 300, compression = 'none')
-# p1
+p
+# tiff("../../fig/suppl_fig_ms.tiff", width = 15, height = 15, units = 'in', res = 300, compression = 'none')
+# p
 # dev.off()
-# 
-# tiff("../../fig/suppl_fig_ms2.tiff", width = 8, height = 10, units = 'in', res = 300, compression = 'none')
-# p2
-# dev.off()
+
 
 ```
 
